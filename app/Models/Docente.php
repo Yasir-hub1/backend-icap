@@ -5,9 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
+use Tymon\JWTAuth\Contracts\JWTSubject;
+use App\Models\Traits\Authenticatable;
 
-class Docente extends Usuario
+class Docente extends Usuario implements AuthenticatableContract, JWTSubject
 {
+    use Authenticatable;
     protected $table = 'Docente';
 
     protected $fillable = [
@@ -21,7 +25,13 @@ class Docente extends Usuario
         'registro_docente',
         'cargo',
         'area_de_especializacion',
-        'modalidad_de_contratacion'
+        'modalidad_de_contratacion',
+        'password',
+        'rol'
+    ];
+
+    protected $hidden = [
+        'password'
     ];
 
     protected $casts = [
@@ -92,5 +102,33 @@ class Docente extends Usuario
                     ->sum(function($grupo) {
                         return $grupo->horario->hora_fin->diffInHours($grupo->horario->hora_ini);
                     });
+    }
+
+    /**
+     * Get the identifier that will be stored in the subject claim of the JWT.
+     */
+    public function getJWTIdentifier()
+    {
+        return $this->getKey();
+    }
+
+    /**
+     * Return a key value array, containing any custom claims to be added to the JWT.
+     */
+    public function getJWTCustomClaims()
+    {
+        return [
+            'rol' => $this->rol ?? 'DOCENTE',
+            'ci' => $this->ci,
+            'registro' => $this->registro_docente
+        ];
+    }
+
+    /**
+     * Get the password for the user.
+     */
+    public function getAuthPassword()
+    {
+        return $this->password;
     }
 }

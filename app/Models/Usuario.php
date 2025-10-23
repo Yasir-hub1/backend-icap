@@ -17,7 +17,8 @@ class Usuario extends Model
         'celular',
         'fecha_nacimiento',
         'direccion',
-        'fotografia'
+        'fotografia',
+        'clave'
     ];
 
     protected $casts = [

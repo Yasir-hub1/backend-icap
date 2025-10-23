@@ -5,187 +5,182 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Documento;
 use App\Models\TipoDocumento;
-use App\Models\Convenio;
-use App\Models\Estudiante;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 class DocumentoController extends Controller
 {
     /**
-     * Listar documentos con filtros optimizados
+     * Listar todos los documentos
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Documento::with([
-            'tipoDocumento:id,nombre_entidad,descripcion',
-            'convenio:id,numero_convenio,objeto_convenio',
-            'estudiante:id,ci,nombre,apellido'
-        ]);
-
-        // Filtros optimizados
-        if ($request->filled('buscar')) {
-            $buscar = $request->get('buscar');
-            $query->where('nombre_documento', 'ILIKE', "%{$buscar}%")
-                  ->orWhereHas('estudiante', function($q) use ($buscar) {
-                      $q->where('ci', 'ILIKE', "%{$buscar}%")
-                        ->orWhere('nombre', 'ILIKE', "%{$buscar}%")
-                        ->orWhere('apellido', 'ILIKE', "%{$buscar}%");
-                  });
-        }
-
-        if ($request->filled('tipo_documento_id')) {
-            $query->where('Tipo_documento_id', $request->get('tipo_documento_id'));
-        }
-
-        if ($request->filled('convenio_id')) {
-            $query->where('convenio_id', $request->get('convenio_id'));
-        }
-
-        if ($request->filled('estudiante_id')) {
-            $query->where('estudiante_id', $request->get('estudiante_id'));
-        }
-
-        if ($request->filled('estado')) {
-            $query->where('estado', $request->get('estado'));
-        }
-
-        // Ordenamiento
-        $query->latest();
-
-        // Paginación con caché
-        $cacheKey = 'documentos_' . md5(serialize($request->all()));
-
-        $documentos = Cache::remember($cacheKey, 300, function() use ($query, $request) {
-            return $query->paginate($request->get('per_page', 15));
-        });
-
-        return response()->json([
-            'success' => true,
-            'data' => $documentos,
-            'message' => 'Documentos obtenidos exitosamente'
-        ]);
-    }
-
-    /**
-     * Obtener documento específico
-     */
-    public function show(int $id): JsonResponse
-    {
-        $documento = Documento::with([
-            'tipoDocumento:id,nombre_entidad,descripcion',
-            'convenio:id,numero_convenio,objeto_convenio',
-            'estudiante:id,ci,nombre,apellido,registro_estudiante'
-        ])->findOrFail($id);
-
-        return response()->json([
-            'success' => true,
-            'data' => $documento,
-            'message' => 'Documento obtenido exitosamente'
-        ]);
-    }
-
-    /**
-     * Crear nuevo documento
-     */
-    public function store(Request $request): JsonResponse
-    {
-        $request->validate([
-            'nombre_documento' => 'required|string|max:200',
-            'version' => 'nullable|string|max:20',
-            'path_documento' => 'required|string',
-            'estado' => 'required|integer|in:0,1',
-            'observaciones' => 'nullable|string',
-            'Tipo_documento_id' => 'required|exists:Tipo_documento,id',
-            'convenio_id' => 'required|exists:Convenio,id',
-            'estudiante_id' => 'required|exists:Estudiante,id'
-        ]);
-
-        DB::beginTransaction();
         try {
-            $documento = Documento::create($request->validated());
+            $query = Documento::with(['tipoDocumento', 'estudiante']);
 
-            // Limpiar caché
-            Cache::forget('documentos_*');
+            // Filtros
+            if ($request->has('estudiante_id')) {
+                $query->where('estudiante_id', $request->estudiante_id);
+            }
 
-            DB::commit();
+            if ($request->has('tipo_documento_id')) {
+                $query->where('tipo_documento_id', $request->tipo_documento_id);
+            }
+
+            if ($request->has('estado')) {
+                $query->where('estado', $request->estado);
+            }
+
+            $documentos = $query->paginate($request->get('per_page', 15));
 
             return response()->json([
                 'success' => true,
-                'data' => $documento->load(['tipoDocumento', 'convenio', 'estudiante']),
-                'message' => 'Documento creado exitosamente'
-            ], 201);
-
+                'data' => $documentos,
+                'message' => 'Documentos obtenidos exitosamente'
+            ]);
         } catch (\Exception $e) {
-            DB::rollBack();
             return response()->json([
                 'success' => false,
-                'message' => 'Error al crear documento: ' . $e->getMessage()
+                'message' => 'Error al obtener documentos: ' . $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Actualizar documento
+     * Mostrar un documento específico
      */
-    public function update(Request $request, int $id): JsonResponse
+    public function show($id): JsonResponse
     {
-        $documento = Documento::findOrFail($id);
+        try {
+            $documento = Documento::with(['tipoDocumento', 'estudiante'])->find($id);
 
-        $request->validate([
-            'nombre_documento' => 'required|string|max:200',
-            'version' => 'nullable|string|max:20',
-            'path_documento' => 'required|string',
-            'estado' => 'required|integer|in:0,1',
-            'observaciones' => 'nullable|string',
-            'Tipo_documento_id' => 'required|exists:Tipo_documento,id',
-            'convenio_id' => 'required|exists:Convenio,id',
-            'estudiante_id' => 'required|exists:Estudiante,id'
-        ]);
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento no encontrado'
+                ], 404);
+            }
 
-        $documento->update($request->validated());
-
-        // Limpiar caché
-        Cache::forget('documentos_*');
-
-        return response()->json([
-            'success' => true,
-            'data' => $documento->load(['tipoDocumento', 'convenio', 'estudiante']),
-            'message' => 'Documento actualizado exitosamente'
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $documento,
+                'message' => 'Documento obtenido exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener documento: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
-     * Eliminar documento
+     * Subir un nuevo documento
      */
-    public function destroy(int $id): JsonResponse
+    public function store(Request $request): JsonResponse
     {
-        $documento = Documento::findOrFail($id);
-
-        DB::beginTransaction();
         try {
-            // Eliminar archivo físico si existe
-            if ($documento->path_documento && Storage::exists($documento->path_documento)) {
-                Storage::delete($documento->path_documento);
+            $request->validate([
+                'estudiante_id' => 'required|exists:estudiantes,id',
+                'tipo_documento_id' => 'required|exists:tipos_documento,id',
+                'archivo' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240', // 10MB max
+                'descripcion' => 'nullable|string|max:500'
+            ]);
+
+            $archivo = $request->file('archivo');
+            $nombreArchivo = time() . '_' . $archivo->getClientOriginalName();
+            $ruta = $archivo->storeAs('documentos', $nombreArchivo, 'public');
+
+            $documento = Documento::create([
+                'estudiante_id' => $request->estudiante_id,
+                'tipo_documento_id' => $request->tipo_documento_id,
+                'nombre_archivo' => $nombreArchivo,
+                'ruta_archivo' => $ruta,
+                'tamaño_archivo' => $archivo->getSize(),
+                'tipo_mime' => $archivo->getMimeType(),
+                'descripcion' => $request->descripcion,
+                'estado' => 'pendiente'
+            ]);
+
+            $documento->load(['tipoDocumento', 'estudiante']);
+
+            return response()->json([
+                'success' => true,
+                'data' => $documento,
+                'message' => 'Documento subido exitosamente'
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al subir documento: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Actualizar un documento
+     */
+    public function update(Request $request, $id): JsonResponse
+    {
+        try {
+            $documento = Documento::find($id);
+
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento no encontrado'
+                ], 404);
+            }
+
+            $request->validate([
+                'descripcion' => 'nullable|string|max:500',
+                'estado' => 'sometimes|in:pendiente,aprobado,rechazado'
+            ]);
+
+            $documento->update($request->only(['descripcion', 'estado']));
+            $documento->load(['tipoDocumento', 'estudiante']);
+
+            return response()->json([
+                'success' => true,
+                'data' => $documento,
+                'message' => 'Documento actualizado exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al actualizar documento: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Eliminar un documento
+     */
+    public function destroy($id): JsonResponse
+    {
+        try {
+            $documento = Documento::find($id);
+
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento no encontrado'
+                ], 404);
+            }
+
+            // Eliminar archivo del storage
+            if (Storage::disk('public')->exists($documento->ruta_archivo)) {
+                Storage::disk('public')->delete($documento->ruta_archivo);
             }
 
             $documento->delete();
-
-            // Limpiar caché
-            Cache::forget('documentos_*');
-
-            DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Documento eliminado exitosamente'
             ]);
-
         } catch (\Exception $e) {
-            DB::rollBack();
             return response()->json([
                 'success' => false,
                 'message' => 'Error al eliminar documento: ' . $e->getMessage()
@@ -194,86 +189,166 @@ class DocumentoController extends Controller
     }
 
     /**
-     * Subir archivo de documento
+     * Aprobar un documento
      */
-    public function subirArchivo(Request $request): JsonResponse
+    public function approve($id): JsonResponse
     {
-        $request->validate([
-            'archivo' => 'required|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240', // 10MB max
-            'tipo_documento_id' => 'required|exists:Tipo_documento,id',
-            'convenio_id' => 'required|exists:Convenio,id',
-            'estudiante_id' => 'required|exists:Estudiante,id'
-        ]);
-
         try {
-            $archivo = $request->file('archivo');
-            $nombreArchivo = time() . '_' . $archivo->getClientOriginalName();
-            $ruta = $archivo->storeAs('documentos', $nombreArchivo, 'public');
+            $documento = Documento::find($id);
 
-            $documento = Documento::create([
-                'nombre_documento' => $archivo->getClientOriginalName(),
-                'version' => '1.0',
-                'path_documento' => $ruta,
-                'estado' => 1,
-                'Tipo_documento_id' => $request->get('tipo_documento_id'),
-                'convenio_id' => $request->get('convenio_id'),
-                'estudiante_id' => $request->get('estudiante_id')
-            ]);
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento no encontrado'
+                ], 404);
+            }
+
+            $documento->update(['estado' => 'aprobado']);
+            $documento->load(['tipoDocumento', 'estudiante']);
 
             return response()->json([
                 'success' => true,
-                'data' => $documento->load(['tipoDocumento', 'convenio', 'estudiante']),
-                'message' => 'Archivo subido exitosamente'
-            ], 201);
-
+                'data' => $documento,
+                'message' => 'Documento aprobado exitosamente'
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al subir archivo: ' . $e->getMessage()
+                'message' => 'Error al aprobar documento: ' . $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Descargar documento
+     * Rechazar un documento
      */
-    public function descargar(int $id): \Symfony\Component\HttpFoundation\StreamedResponse
+    public function reject($id): JsonResponse
     {
-        $documento = Documento::findOrFail($id);
+        try {
+            $documento = Documento::find($id);
 
-        if (!Storage::exists($documento->path_documento)) {
-            abort(404, 'Archivo no encontrado');
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento no encontrado'
+                ], 404);
+            }
+
+            $documento->update(['estado' => 'rechazado']);
+            $documento->load(['tipoDocumento', 'estudiante']);
+
+            return response()->json([
+                'success' => true,
+                'data' => $documento,
+                'message' => 'Documento rechazado exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al rechazar documento: ' . $e->getMessage()
+            ], 500);
         }
-
-        return Storage::download($documento->path_documento, $documento->nombre_documento);
     }
 
     /**
-     * Obtener estadísticas de documentos
+     * Descargar un documento
      */
-    public function estadisticas(): JsonResponse
+    public function download($id): JsonResponse
     {
-        $cacheKey = 'estadisticas_documentos';
+        try {
+            $documento = Documento::find($id);
 
-        $estadisticas = Cache::remember($cacheKey, 600, function() {
-            return [
-                'total' => Documento::count(),
-                'activos' => Documento::activos()->count(),
-                'por_tipo' => TipoDocumento::withCount('documentos')->get(),
-                'por_convenio' => Convenio::withCount('documentos')->get(),
-                'por_estudiante' => Estudiante::withCount('documentos')->get(),
-                'tamaño_total' => Documento::whereNotNull('path_documento')
-                    ->get()
-                    ->sum(function($doc) {
-                        return Storage::exists($doc->path_documento) ? Storage::size($doc->path_documento) : 0;
-                    })
-            ];
-        });
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento no encontrado'
+                ], 404);
+            }
 
-        return response()->json([
-            'success' => true,
-            'data' => $estadisticas,
-            'message' => 'Estadísticas obtenidas exitosamente'
-        ]);
+            if (!Storage::disk('public')->exists($documento->ruta_archivo)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Archivo no encontrado en el servidor'
+                ], 404);
+            }
+
+            $rutaCompleta = Storage::disk('public')->path($documento->ruta_archivo);
+
+            return response()->download($rutaCompleta, $documento->nombre_archivo);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al descargar documento: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener documentos por estudiante
+     */
+    public function getByEstudiante($estudianteId): JsonResponse
+    {
+        try {
+            $documentos = Documento::with(['tipoDocumento'])
+                ->where('estudiante_id', $estudianteId)
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $documentos,
+                'message' => 'Documentos del estudiante obtenidos exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener documentos del estudiante: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener documentos pendientes
+     */
+    public function getPending(): JsonResponse
+    {
+        try {
+            $documentos = Documento::with(['tipoDocumento', 'estudiante'])
+                ->where('estado', 'pendiente')
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $documentos,
+                'message' => 'Documentos pendientes obtenidos exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener documentos pendientes: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener tipos de documento
+     */
+    public function getTipos(): JsonResponse
+    {
+        try {
+            $tipos = TipoDocumento::where('activo', true)->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $tipos,
+                'message' => 'Tipos de documento obtenidos exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener tipos de documento: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

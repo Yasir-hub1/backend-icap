@@ -4,260 +4,262 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
-use App\Models\Programa;
 use App\Models\Inscripcion;
 use App\Models\Pago;
-use App\Models\Institucion;
-use App\Models\Convenio;
+use App\Models\Programa;
 use App\Models\Grupo;
+use App\Models\Docente;
+use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
     /**
-     * Resumen general del dashboard
+     * Dashboard para estudiantes
      */
-    public function resumen(): JsonResponse
+    public function estudiante(Request $request): JsonResponse
     {
-        $cacheKey = 'dashboard_resumen';
+        try {
+            $estudianteId = $request->user()->id;
 
-        $resumen = Cache::remember($cacheKey, 300, function() {
-            return [
+            $estadisticas = [
+                'inscripciones' => [
+                    'total' => Inscripcion::where('estudiante_id', $estudianteId)->count(),
+                    'pendientes' => Inscripcion::where('estudiante_id', $estudianteId)
+                                               ->where('estado', 'pendiente')->count(),
+                    'aprobadas' => Inscripcion::where('estudiante_id', $estudianteId)
+                                             ->where('estado', 'aprobada')->count()
+                ],
+                'pagos' => [
+                    'total' => Pago::whereHas('inscripcion', function($q) use ($estudianteId) {
+                        $q->where('estudiante_id', $estudianteId);
+                    })->count(),
+                    'pendientes' => Pago::whereHas('inscripcion', function($q) use ($estudianteId) {
+                        $q->where('estudiante_id', $estudianteId);
+                    })->where('estado', 'pendiente')->count(),
+                    'verificados' => Pago::whereHas('inscripcion', function($q) use ($estudianteId) {
+                        $q->where('estudiante_id', $estudianteId);
+                    })->where('estado', 'verificado')->count()
+                ],
+                'documentos' => [
+                    'total' => 0, // Implementar cuando se cree el modelo Documento
+                    'pendientes' => 0,
+                    'aprobados' => 0
+                ]
+            ];
+
+            // Inscripciones recientes
+            $inscripcionesRecientes = Inscripcion::with(['programa'])
+                ->where('estudiante_id', $estudianteId)
+                ->orderBy('created_at', 'desc')
+                ->limit(5)
+                ->get();
+
+            // Pagos recientes
+            $pagosRecientes = Pago::with(['inscripcion.programa'])
+                ->whereHas('inscripcion', function($q) use ($estudianteId) {
+                    $q->where('estudiante_id', $estudianteId);
+                })
+                ->orderBy('created_at', 'desc')
+                ->limit(5)
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'estadisticas' => $estadisticas,
+                    'inscripciones_recientes' => $inscripcionesRecientes,
+                    'pagos_recientes' => $pagosRecientes
+                ],
+                'message' => 'Dashboard del estudiante obtenido exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener dashboard del estudiante: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Dashboard para administradores
+     */
+    public function admin(Request $request): JsonResponse
+    {
+        try {
+            $estadisticas = [
                 'estudiantes' => [
                     'total' => Estudiante::count(),
-                    'activos' => Estudiante::activos()->count(),
-                    'nuevos_mes' => Estudiante::whereHas('inscripciones', function($q) {
-                        $q->where('fecha', '>=', now()->subMonth());
+                    'nuevos_este_mes' => Estudiante::where('created_at', '>=', now()->startOfMonth())->count(),
+                    'activos' => Estudiante::whereHas('estado', function($q) {
+                        $q->where('nombre', 'Activo');
                     })->count()
-                ],
-                'programas' => [
-                    'total' => Programa::count(),
-                    'activos' => Programa::activos()->count(),
-                    'cursos' => Programa::where('duracion_meses', '<', 12)->count(),
-                    'programas' => Programa::where('duracion_meses', '>=', 12)->count()
                 ],
                 'inscripciones' => [
                     'total' => Inscripcion::count(),
-                    'mes_actual' => Inscripcion::whereMonth('fecha', now()->month)
-                        ->whereYear('fecha', now()->year)
-                        ->count(),
-                    'mes_anterior' => Inscripcion::whereMonth('fecha', now()->subMonth()->month)
-                        ->whereYear('fecha', now()->subMonth()->year)
-                        ->count()
+                    'pendientes' => Inscripcion::where('estado', 'pendiente')->count(),
+                    'aprobadas' => Inscripcion::where('estado', 'aprobada')->count(),
+                    'rechazadas' => Inscripcion::where('estado', 'rechazada')->count(),
+                    'este_mes' => Inscripcion::where('created_at', '>=', now()->startOfMonth())->count()
                 ],
                 'pagos' => [
-                    'total_mes' => Pago::whereMonth('fecha', now()->month)
-                        ->whereYear('fecha', now()->year)
-                        ->sum('monto'),
-                    'total_anterior' => Pago::whereMonth('fecha', now()->subMonth()->month)
-                        ->whereYear('fecha', now()->subMonth()->year)
-                        ->sum('monto'),
-                    'cantidad_mes' => Pago::whereMonth('fecha', now()->month)
-                        ->whereYear('fecha', now()->year)
-                        ->count()
+                    'total' => Pago::count(),
+                    'monto_total' => Pago::sum('monto'),
+                    'pendientes' => Pago::where('estado', 'pendiente')->count(),
+                    'verificados' => Pago::where('estado', 'verificado')->count(),
+                    'monto_este_mes' => Pago::where('created_at', '>=', now()->startOfMonth())->sum('monto')
                 ],
-                'instituciones' => [
-                    'total' => Institucion::count(),
-                    'activas' => Institucion::activas()->count(),
-                    'con_convenios' => Institucion::conConveniosActivos()->count()
+                'programas' => [
+                    'total' => Programa::count(),
+                    'activos' => Programa::where('estado', 'activo')->count(),
+                    'inactivos' => Programa::where('estado', 'inactivo')->count()
                 ],
                 'grupos' => [
-                    'activos' => Grupo::activos()->count(),
-                    'finalizados_mes' => Grupo::whereMonth('fecha_fin', now()->month)
-                        ->whereYear('fecha_fin', now()->year)
-                        ->count()
+                    'total' => Grupo::count(),
+                    'activos' => Grupo::where('estado', 'activo')->count(),
+                    'completados' => Grupo::where('estado', 'completado')->count()
+                ],
+                'docentes' => [
+                    'total' => Docente::count(),
+                    'activos' => Docente::where('estado', 'activo')->count()
                 ]
             ];
-        });
 
-        return response()->json([
-            'success' => true,
-            'data' => $resumen,
-            'message' => 'Resumen obtenido exitosamente'
-        ]);
+            // Inscripciones pendientes de aprobación
+            $inscripcionesPendientes = Inscripcion::with(['estudiante', 'programa'])
+                ->where('estado', 'pendiente')
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get();
+
+            // Pagos pendientes de verificación
+            $pagosPendientes = Pago::with(['inscripcion.estudiante', 'inscripcion.programa'])
+                ->where('estado', 'pendiente')
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get();
+
+            // Programas más populares
+            $programasPopulares = Programa::withCount('inscripciones')
+                ->orderBy('inscripciones_count', 'desc')
+                ->limit(5)
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'estadisticas' => $estadisticas,
+                    'inscripciones_pendientes' => $inscripcionesPendientes,
+                    'pagos_pendientes' => $pagosPendientes,
+                    'programas_populares' => $programasPopulares
+                ],
+                'message' => 'Dashboard del administrador obtenido exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener dashboard del administrador: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
-     * Datos para gráficos
+     * Dashboard para docentes
      */
-    public function graficos(): JsonResponse
+    public function docente(Request $request): JsonResponse
     {
-        $cacheKey = 'dashboard_graficos';
+        try {
+            $docenteId = $request->user()->id;
 
-        $graficos = Cache::remember($cacheKey, 600, function() {
-            return [
-                'inscripciones_por_mes' => Inscripcion::selectRaw('DATE_TRUNC(\'month\', fecha) as mes, COUNT(*) as total')
-                    ->where('fecha', '>=', now()->subMonths(12))
-                    ->groupBy('mes')
-                    ->orderBy('mes')
-                    ->get(),
-                'pagos_por_mes' => Pago::selectRaw('DATE_TRUNC(\'month\', fecha) as mes, SUM(monto) as total')
-                    ->where('fecha', '>=', now()->subMonths(12))
-                    ->groupBy('mes')
-                    ->orderBy('mes')
-                    ->get(),
-                'estudiantes_por_programa' => Programa::withCount('inscripciones')
-                    ->activos()
-                    ->orderBy('inscripciones_count', 'desc')
-                    ->limit(10)
-                    ->get(),
-                'ingresos_por_institucion' => Institucion::withCount('programas')
-                    ->activas()
-                    ->orderBy('programas_count', 'desc')
-                    ->limit(10)
-                    ->get(),
-                'estudiantes_por_estado' => \App\Models\EstadoEstudiante::withCount('estudiantes')
-                    ->get(),
-                'programas_por_tipo' => \App\Models\TipoPrograma::withCount('programas')
-                    ->get(),
-                'convenios_por_estado' => [
-                    'activos' => Convenio::activos()->count(),
-                    'vencidos' => Convenio::vencidos()->count(),
-                    'inactivos' => Convenio::where('estado', 0)->count()
+            $estadisticas = [
+                'grupos' => [
+                    'total' => Grupo::where('docente_id', $docenteId)->count(),
+                    'activos' => Grupo::where('docente_id', $docenteId)
+                                      ->where('estado', 'activo')->count(),
+                    'completados' => Grupo::where('docente_id', $docenteId)
+                                          ->where('estado', 'completado')->count()
+                ],
+                'estudiantes' => [
+                    'total' => DB::table('grupo_estudiante')
+                        ->join('grupos', 'grupo_estudiante.grupo_id', '=', 'grupos.id')
+                        ->where('grupos.docente_id', $docenteId)
+                        ->count(),
+                    'por_grupo' => Grupo::where('docente_id', $docenteId)
+                        ->withCount('estudiantes')
+                        ->get()
+                        ->pluck('estudiantes_count')
+                        ->sum()
+                ],
+                'clases' => [
+                    'esta_semana' => 0, // Implementar cuando se cree el modelo Horario
+                    'proximas' => 0
                 ]
             ];
-        });
 
-        return response()->json([
-            'success' => true,
-            'data' => $graficos,
-            'message' => 'Datos de gráficos obtenidos exitosamente'
-        ]);
+            // Grupos asignados
+            $gruposAsignados = Grupo::with(['programa', 'estudiantes'])
+                ->where('docente_id', $docenteId)
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            // Estudiantes por grupo
+            $estudiantesPorGrupo = [];
+            foreach ($gruposAsignados as $grupo) {
+                $estudiantesPorGrupo[] = [
+                    'grupo' => $grupo->nombre,
+                    'programa' => $grupo->programa->nombre,
+                    'estudiantes' => $grupo->estudiantes->count(),
+                    'capacidad' => $grupo->capacidad_maxima
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'estadisticas' => $estadisticas,
+                    'grupos_asignados' => $gruposAsignados,
+                    'estudiantes_por_grupo' => $estudiantesPorGrupo
+                ],
+                'message' => 'Dashboard del docente obtenido exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener dashboard del docente: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
-     * Alertas del sistema
+     * Obtener estadísticas generales del sistema
      */
-    public function alertas(): JsonResponse
+    public function estadisticasGenerales(): JsonResponse
     {
-        $cacheKey = 'dashboard_alertas';
+        try {
+            $estadisticas = [
+                'estudiantes' => Estudiante::count(),
+                'inscripciones' => Inscripcion::count(),
+                'pagos' => Pago::count(),
+                'programas' => Programa::count(),
+                'grupos' => Grupo::count(),
+                'docentes' => Docente::count(),
+                'monto_total_pagos' => Pago::sum('monto'),
+                'inscripciones_este_mes' => Inscripcion::where('created_at', '>=', now()->startOfMonth())->count(),
+                'pagos_este_mes' => Pago::where('created_at', '>=', now()->startOfMonth())->count(),
+                'monto_este_mes' => Pago::where('created_at', '>=', now()->startOfMonth())->sum('monto')
+            ];
 
-        $alertas = Cache::remember($cacheKey, 300, function() {
-            $alertas = [];
-
-            // Cuotas vencidas
-            $cuotasVencidas = \App\Models\Cuota::vencidas()->count();
-            if ($cuotasVencidas > 0) {
-                $alertas[] = [
-                    'tipo' => 'warning',
-                    'titulo' => 'Cuotas Vencidas',
-                    'mensaje' => "Hay {$cuotasVencidas} cuotas vencidas sin pagar",
-                    'accion' => 'revisar_cuotas_vencidas'
-                ];
-            }
-
-            // Convenios por vencer
-            $conveniosPorVencer = Convenio::where('fecha_fin', '<=', now()->addDays(30))
-                ->where('fecha_fin', '>', now())
-                ->where('estado', 1)
-                ->count();
-
-            if ($conveniosPorVencer > 0) {
-                $alertas[] = [
-                    'tipo' => 'info',
-                    'titulo' => 'Convenios por Vencer',
-                    'mensaje' => "Hay {$conveniosPorVencer} convenios que vencen en los próximos 30 días",
-                    'accion' => 'revisar_convenios'
-                ];
-            }
-
-            // Grupos sin estudiantes
-            $gruposSinEstudiantes = Grupo::activos()
-                ->whereDoesntHave('estudiantes')
-                ->count();
-
-            if ($gruposSinEstudiantes > 0) {
-                $alertas[] = [
-                    'tipo' => 'warning',
-                    'titulo' => 'Grupos sin Estudiantes',
-                    'mensaje' => "Hay {$gruposSinEstudiantes} grupos activos sin estudiantes inscritos",
-                    'accion' => 'revisar_grupos'
-                ];
-            }
-
-            // Inscripciones sin plan de pagos
-            $inscripcionesSinPlan = Inscripcion::whereDoesntHave('planPagos')
-                ->where('fecha', '>=', now()->subDays(7))
-                ->count();
-
-            if ($inscripcionesSinPlan > 0) {
-                $alertas[] = [
-                    'tipo' => 'info',
-                    'titulo' => 'Inscripciones sin Plan de Pagos',
-                    'mensaje' => "Hay {$inscripcionesSinPlan} inscripciones recientes sin plan de pagos",
-                    'accion' => 'revisar_inscripciones'
-                ];
-            }
-
-            return $alertas;
-        });
-
-        return response()->json([
-            'success' => true,
-            'data' => $alertas,
-            'message' => 'Alertas obtenidas exitosamente'
-        ]);
-    }
-
-    /**
-     * Actividad reciente del sistema
-     */
-    public function actividadReciente(): JsonResponse
-    {
-        $cacheKey = 'dashboard_actividad_reciente';
-
-        $actividad = Cache::remember($cacheKey, 300, function() {
-            $actividad = [];
-
-            // Inscripciones recientes
-            $inscripcionesRecientes = Inscripcion::with([
-                'estudiante:id,ci,nombre,apellido',
-                'programa:id,nombre'
-            ])
-            ->latest()
-            ->limit(5)
-            ->get();
-
-            foreach ($inscripcionesRecientes as $inscripcion) {
-                $actividad[] = [
-                    'tipo' => 'inscripcion',
-                    'fecha' => $inscripcion->fecha,
-                    'descripcion' => "Nueva inscripción: {$inscripcion->estudiante->nombre} {$inscripcion->estudiante->apellido} en {$inscripcion->programa->nombre}",
-                    'usuario' => $inscripcion->estudiante->nombre_completo
-                ];
-            }
-
-            // Pagos recientes
-            $pagosRecientes = Pago::with([
-                'cuota.planPagos.inscripcion.estudiante:id,ci,nombre,apellido',
-                'cuota.planPagos.inscripcion.programa:id,nombre'
-            ])
-            ->latest()
-            ->limit(5)
-            ->get();
-
-            foreach ($pagosRecientes as $pago) {
-                $actividad[] = [
-                    'tipo' => 'pago',
-                    'fecha' => $pago->fecha,
-                    'descripcion' => "Pago registrado: Bs. {$pago->monto} de {$pago->cuota->planPagos->inscripcion->estudiante->nombre} {$pago->cuota->planPagos->inscripcion->estudiante->apellido}",
-                    'monto' => $pago->monto
-                ];
-            }
-
-            // Ordenar por fecha descendente
-            usort($actividad, function($a, $b) {
-                return strtotime($b['fecha']) - strtotime($a['fecha']);
-            });
-
-            return array_slice($actividad, 0, 10);
-        });
-
-        return response()->json([
-            'success' => true,
-            'data' => $actividad,
-            'message' => 'Actividad reciente obtenida exitosamente'
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $estadisticas,
+                'message' => 'Estadísticas generales obtenidas exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener estadísticas generales: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

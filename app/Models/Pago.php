@@ -14,6 +14,12 @@ class Pago extends Model
         'fecha',
         'monto',
         'token',
+        'metodo',
+        'comprobante_path',
+        'observaciones',
+        'verificado',
+        'fecha_verificacion',
+        'verificado_por',
         'cuotas_id'
     ];
 
@@ -21,7 +27,10 @@ class Pago extends Model
         'id' => 'integer',
         'fecha' => 'datetime',
         'monto' => 'decimal:2',
-        'cuotas_id' => 'integer'
+        'cuotas_id' => 'integer',
+        'verificado' => 'boolean',
+        'fecha_verificacion' => 'datetime',
+        'verificado_por' => 'integer'
     ];
 
     /**
@@ -33,11 +42,35 @@ class Pago extends Model
     }
 
     /**
+     * Relación con usuario verificador
+     */
+    public function verificador(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'verificado_por');
+    }
+
+    /**
      * Scope para pagos recientes
      */
     public function scopeRecientes($query, int $dias = 30)
     {
         return $query->where('fecha', '>=', now()->subDays($dias));
+    }
+
+    /**
+     * Scope para pagos verificados
+     */
+    public function scopeVerificados($query)
+    {
+        return $query->where('verificado', true);
+    }
+
+    /**
+     * Scope para pagos pendientes de verificación
+     */
+    public function scopePendientesVerificacion($query)
+    {
+        return $query->where('verificado', false);
     }
 
     /**
