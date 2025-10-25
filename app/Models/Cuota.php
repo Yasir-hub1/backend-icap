@@ -10,6 +10,7 @@ class Cuota extends Model
 {
     protected $table = 'cuotas';
     protected $primaryKey = 'id';
+    public $timestamps = false;
 
     protected $fillable = [
         'fecha_ini',

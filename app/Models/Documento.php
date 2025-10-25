@@ -9,6 +9,7 @@ class Documento extends Model
 {
     protected $table = 'documentos';
     protected $primaryKey = 'documento_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre_documento',

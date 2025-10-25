@@ -15,6 +15,7 @@ class Estudiante extends Persona implements AuthenticatableContract, JWTSubject
     use Authenticatable;
     protected $table = 'estudiante';
     protected $primaryKey = 'registro_estudiante';
+    public $timestamps = false;
 
     protected $fillable = [
         'persona_id',

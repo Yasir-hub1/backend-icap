@@ -9,6 +9,7 @@ class Modulo extends Model
 {
     protected $table = 'modulo';
     protected $primaryKey = 'modulo_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre',

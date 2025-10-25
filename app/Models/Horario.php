@@ -9,6 +9,7 @@ class Horario extends Model
 {
     protected $table = 'horario';
     protected $primaryKey = 'horario_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'dias',

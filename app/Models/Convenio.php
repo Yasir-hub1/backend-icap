@@ -11,6 +11,7 @@ class Convenio extends Model
 {
     protected $table = 'convenio';
     protected $primaryKey = 'convenio_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'numero_convenio',

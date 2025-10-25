@@ -9,6 +9,7 @@ class TipoConvenio extends Model
 {
     protected $table = 'tipo_convenio';
     protected $primaryKey = 'tipo_convenio_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre_tipo',

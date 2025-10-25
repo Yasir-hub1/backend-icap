@@ -11,6 +11,7 @@ class Programa extends Model
 {
     protected $table = 'programa';
     protected $primaryKey = 'id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre',

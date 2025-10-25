@@ -9,6 +9,7 @@ class TipoDocumento extends Model
 {
     protected $table = 'tipo_documento';
     protected $primaryKey = 'Tipo_documento_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre_entidad'

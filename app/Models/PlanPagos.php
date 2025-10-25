@@ -10,6 +10,7 @@ class PlanPagos extends Model
 {
     protected $table = 'plan_pagos';
     protected $primaryKey = 'id';
+    public $timestamps = false;
 
     protected $fillable = [
         'monto_total',

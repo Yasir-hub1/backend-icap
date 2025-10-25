@@ -9,6 +9,7 @@ class Descuento extends Model
 {
     protected $table = 'descuento';
     protected $primaryKey = 'id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre',

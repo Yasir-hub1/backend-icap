@@ -9,6 +9,7 @@ class Pago extends Model
 {
     protected $table = 'pagos';
     protected $primaryKey = 'id';
+    public $timestamps = false;
 
     protected $fillable = [
         'fecha',

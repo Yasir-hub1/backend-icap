@@ -10,6 +10,7 @@ class Grupo extends Model
 {
     protected $table = 'grupo';
     protected $primaryKey = 'grupo_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'fecha_ini',
