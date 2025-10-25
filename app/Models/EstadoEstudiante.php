@@ -7,38 +7,27 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EstadoEstudiante extends Model
 {
-    protected $table = 'Estado_estudiante';
-    protected $primaryKey = 'id';
+    protected $table = 'estado_estudiante';
+    protected $primaryKey = 'estado_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre_estado'
     ];
 
-    protected $casts = [
-        'id' => 'integer'
-    ];
-
     /**
-     * Relación con estudiantes
+     * Relación con estudiantes en grupo_estudiante
      */
-    public function estudiantes(): HasMany
+    public function estudiantesEnGrupo(): HasMany
     {
-        return $this->hasMany(Estudiante::class, 'Estado_id');
+        return $this->hasMany(GrupoEstudiante::class, 'estado', 'estado_id');
     }
 
     /**
-     * Scope para estado activo
+     * Scope para buscar por nombre
      */
-    public function scopeActivo($query)
+    public function scopePorNombre($query, string $nombre)
     {
-        return $query->where('nombre_estado', 'Activo');
-    }
-
-    /**
-     * Scope para estado inactivo
-     */
-    public function scopeInactivo($query)
-    {
-        return $query->where('nombre_estado', 'Inactivo');
+        return $query->where('nombre_estado', 'ILIKE', "%{$nombre}%");
     }
 }

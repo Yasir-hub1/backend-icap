@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Institucion extends Model
 {
-    protected $table = 'Institucion';
+    protected $table = 'institucion';
     protected $primaryKey = 'id';
 
     protected $fillable = [
@@ -24,10 +24,8 @@ class Institucion extends Model
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'fecha_fundacion' => 'date',
-        'estado' => 'integer',
-        'ciudad_id' => 'integer'
+        'ciudad_id' => 'integer',
+        'fecha_fundacion' => 'date'
     ];
 
     /**
@@ -35,7 +33,7 @@ class Institucion extends Model
      */
     public function ciudad(): BelongsTo
     {
-        return $this->belongsTo(Ciudad::class, 'ciudad_id');
+        return $this->belongsTo(Ciudad::class, 'ciudad_id', 'id');
     }
 
     /**
@@ -43,7 +41,7 @@ class Institucion extends Model
      */
     public function programas(): HasMany
     {
-        return $this->hasMany(Programa::class, 'Institucion_id');
+        return $this->hasMany(Programa::class, 'institucion_id', 'id');
     }
 
     /**
@@ -51,7 +49,7 @@ class Institucion extends Model
      */
     public function convenios(): BelongsToMany
     {
-        return $this->belongsToMany(Convenio::class, 'Institucion_convenio', 'Institucion_id', 'Convenio_id')
+        return $this->belongsToMany(Convenio::class, 'Institucion_convenio', 'institucion_id', 'convenio_id')
                     ->withPivot(['porcentaje_participacion', 'monto_asignado', 'estado'])
                     ->withTimestamps();
     }
@@ -61,7 +59,7 @@ class Institucion extends Model
      */
     public function scopeActivas($query)
     {
-        return $query->where('estado', 1);
+        return $query->where('estado', 'activo');
     }
 
     /**
@@ -73,21 +71,10 @@ class Institucion extends Model
     }
 
     /**
-     * Scope para instituciones con convenios activos
+     * Scope para buscar por ciudad
      */
-    public function scopeConConveniosActivos($query)
+    public function scopePorCiudad($query, int $ciudadId)
     {
-        return $query->whereHas('convenios', function($q) {
-            $q->where('fecha_fin', '>=', now())
-              ->where('estado', 1);
-        });
-    }
-
-    /**
-     * Accessor para obtener el nombre completo con ubicación
-     */
-    public function getNombreCompletoAttribute(): string
-    {
-        return "{$this->nombre} - {$this->ciudad->nombre_ciudad}";
+        return $query->where('ciudad_id', $ciudadId);
     }
 }

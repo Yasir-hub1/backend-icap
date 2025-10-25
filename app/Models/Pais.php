@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Pais extends Model
 {
-    protected $table = 'Pais';
+    protected $table = 'pais';
     protected $primaryKey = 'id';
 
     protected $fillable = [
@@ -16,16 +16,12 @@ class Pais extends Model
         'codigo_telefono'
     ];
 
-    protected $casts = [
-        'id' => 'integer'
-    ];
-
     /**
      * Relación con provincias
      */
     public function provincias(): HasMany
     {
-        return $this->hasMany(Provincia::class, 'Pais_id');
+        return $this->hasMany(Provincia::class, 'pais_id', 'id');
     }
 
     /**
@@ -37,10 +33,10 @@ class Pais extends Model
     }
 
     /**
-     * Scope para países activos
+     * Scope para buscar por código ISO
      */
-    public function scopeActivos($query)
+    public function scopePorCodigoIso($query, string $codigo)
     {
-        return $query->whereNotNull('codigo_iso');
+        return $query->where('codigo_iso', $codigo);
     }
 }

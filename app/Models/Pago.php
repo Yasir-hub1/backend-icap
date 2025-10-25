@@ -13,24 +13,16 @@ class Pago extends Model
     protected $fillable = [
         'fecha',
         'monto',
-        'token',
-        'metodo',
-        'comprobante_path',
-        'observaciones',
-        'verificado',
-        'fecha_verificacion',
-        'verificado_por',
-        'cuotas_id'
+        'saldo',
+        'cuota_id'
     ];
 
     protected $casts = [
         'id' => 'integer',
-        'fecha' => 'datetime',
+        'cuota_id' => 'integer',
+        'fecha' => 'date',
         'monto' => 'decimal:2',
-        'cuotas_id' => 'integer',
-        'verificado' => 'boolean',
-        'fecha_verificacion' => 'datetime',
-        'verificado_por' => 'integer'
+        'saldo' => 'decimal:2'
     ];
 
     /**
@@ -38,15 +30,7 @@ class Pago extends Model
      */
     public function cuota(): BelongsTo
     {
-        return $this->belongsTo(Cuota::class, 'cuotas_id');
-    }
-
-    /**
-     * Relación con usuario verificador
-     */
-    public function verificador(): BelongsTo
-    {
-        return $this->belongsTo(Usuario::class, 'verificado_por');
+        return $this->belongsTo(Cuota::class, 'cuota_id', 'id');
     }
 
     /**
@@ -58,19 +42,11 @@ class Pago extends Model
     }
 
     /**
-     * Scope para pagos verificados
+     * Scope para pagos por cuota
      */
-    public function scopeVerificados($query)
+    public function scopePorCuota($query, int $cuotaId)
     {
-        return $query->where('verificado', true);
-    }
-
-    /**
-     * Scope para pagos pendientes de verificación
-     */
-    public function scopePendientesVerificacion($query)
-    {
-        return $query->where('verificado', false);
+        return $query->where('cuota_id', $cuotaId);
     }
 
     /**
@@ -82,26 +58,19 @@ class Pago extends Model
     }
 
     /**
-     * Scope para pagos por monto mínimo
+     * Accessor para verificar si es pago completo
      */
-    public function scopeMontoMinimo($query, float $monto)
+    public function getEsPagoCompletoAttribute(): bool
     {
-        return $query->where('monto', '>=', $monto);
+        return $this->saldo <= 0;
     }
 
     /**
-     * Accessor para obtener información del estudiante
+     * Accessor para obtener porcentaje pagado
      */
-    public function getEstudianteAttribute()
+    public function getPorcentajePagadoAttribute(): float
     {
-        return $this->cuota->planPagos->inscripcion->estudiante;
-    }
-
-    /**
-     * Accessor para obtener información del programa
-     */
-    public function getProgramaAttribute()
-    {
-        return $this->cuota->planPagos->inscripcion->programa;
+        $cuota = $this->cuota;
+        return $cuota ? ($this->monto / $cuota->monto) * 100 : 0;
     }
 }

@@ -19,7 +19,7 @@ class AutenticacionEstudianteController extends Controller
     public function registrar(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'ci' => 'required|string|max:20|unique:Estudiante,ci',
+            'ci' => 'required|string|max:20|unique:estudiante,ci',
             'nombre' => 'required|string|max:100',
             'apellido' => 'required|string|max:100',
             'celular' => 'required|string|max:20',
@@ -42,21 +42,6 @@ class AutenticacionEstudianteController extends Controller
         }
 
         try {
-            // Generate registro_estudiante
-            $year = date('Y');
-            $lastStudent = Estudiante::where('registro_estudiante', 'like', "EST-{$year}-%")
-                                    ->orderBy('registro_estudiante', 'desc')
-                                    ->first();
-
-            if ($lastStudent) {
-                $lastNumber = (int) substr($lastStudent->registro_estudiante, -3);
-                $newNumber = str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
-            } else {
-                $newNumber = '001';
-            }
-
-            $registroEstudiante = "EST-{$year}-{$newNumber}";
-
             // Create student
             $estudiante = Estudiante::create([
                 'ci' => $request->ci,
@@ -65,29 +50,46 @@ class AutenticacionEstudianteController extends Controller
                 'celular' => $request->celular,
                 'fecha_nacimiento' => $request->fecha_nacimiento,
                 'direccion' => $request->direccion,
-                'provincia' => $request->provincia,
-                'registro_estudiante' => $registroEstudiante,
-                'Estado_id' => 1, // Pre-registrado
-                'password' => Hash::make($request->password)
+                'provincia' => $request->provincia
+            ]);
+
+            // Create usuario with password
+            $usuario = \App\Models\Usuario::create([
+                'email' => $request->ci . '@estudiante.com', // Usar CI como email temporal
+                'password' => Hash::make($request->password),
+                'persona_id' => $estudiante->persona_id
             ]);
 
             // Log to Bitacora
             Bitacora::create([
+                'fecha_hora' => now(),
                 'tabla' => 'Estudiante',
-                'codTable' => json_encode([
-                    'estudiante_id' => $estudiante->id,
-                    'ci' => $estudiante->ci,
-                    'registro' => $estudiante->registro_estudiante
-                ]),
+                'cod_tabla' => $estudiante->registro_estudiante,
                 'transaccion' => 'REGISTRO_NUEVO_ESTUDIANTE',
-                'Usuario_id' => $estudiante->id
+                'usuario_id' => $usuario->usuario_id
             ]);
+
+            // Generar token JWT automáticamente después del registro
+            $token = JWTAuth::fromUser($estudiante);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Registro exitoso. Ahora puede iniciar sesión con su CI y contraseña',
+                'message' => 'Registro exitoso. Bienvenido al sistema',
+                'token' => $token,
+                'token_type' => 'bearer',
+                'expires_in' => JWTAuth::factory()->getTTL() * 60,
+                'user' => [
+                    'id' => $estudiante->id,
+                    'ci' => $estudiante->ci,
+                    'nombre' => $estudiante->nombre,
+                    'apellido' => $estudiante->apellido,
+                    'registro_estudiante' => $estudiante->registro_estudiante,
+                    'Estado_id' => $estudiante->Estado_id,
+                    'provincia' => $estudiante->provincia,
+                    'rol' => 'ESTUDIANTE'
+                ],
                 'data' => [
-                    'registro_estudiante' => $registroEstudiante
+                    'registro_estudiante' => $estudiante->registro_estudiante
                 ]
             ], 201);
 
@@ -142,7 +144,7 @@ class AutenticacionEstudianteController extends Controller
                 'success' => true,
                 'token' => $token,
                 'token_type' => 'bearer',
-                'expires_in' => auth()->factory()->getTTL() * 60,
+                'expires_in' => JWTAuth::factory()->getTTL() * 60,
                 'user' => [
                     'id' => $estudiante->id,
                     'ci' => $estudiante->ci,

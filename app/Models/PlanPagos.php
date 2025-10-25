@@ -14,14 +14,14 @@ class PlanPagos extends Model
     protected $fillable = [
         'monto_total',
         'total_cuotas',
-        'Inscripcion_id'
+        'inscripcion_id'
     ];
 
     protected $casts = [
         'id' => 'integer',
         'monto_total' => 'decimal:2',
         'total_cuotas' => 'integer',
-        'Inscripcion_id' => 'integer'
+        'inscripcion_id' => 'integer'
     ];
 
     /**
@@ -29,7 +29,7 @@ class PlanPagos extends Model
      */
     public function inscripcion(): BelongsTo
     {
-        return $this->belongsTo(Inscripcion::class, 'Inscripcion_id');
+        return $this->belongsTo(Inscripcion::class, 'inscripcion_id', 'id');
     }
 
     /**
@@ -37,43 +37,27 @@ class PlanPagos extends Model
      */
     public function cuotas(): HasMany
     {
-        return $this->hasMany(Cuota::class, 'plan_pagos_id');
+        return $this->hasMany(Cuota::class, 'plan_pagos_id', 'id');
     }
 
     /**
-     * Scope para planes activos
+     * Scope para planes completos
      */
-    public function scopeActivos($query)
+    public function scopeCompletos($query)
     {
         return $query->whereHas('cuotas', function($q) {
-            $q->where('fecha_fin', '>=', now());
+            $q->whereDoesntHave('pagos');
+        }, '=', 0);
+    }
+
+    /**
+     * Scope para planes pendientes
+     */
+    public function scopePendientes($query)
+    {
+        return $query->whereHas('cuotas', function($q) {
+            $q->whereDoesntHave('pagos');
         });
-    }
-
-    /**
-     * Scope para planes por inscripción
-     */
-    public function scopePorInscripcion($query, int $inscripcionId)
-    {
-        return $query->where('Inscripcion_id', $inscripcionId);
-    }
-
-    /**
-     * Accessor para calcular el monto pagado
-     */
-    public function getMontoPagadoAttribute(): float
-    {
-        return $this->cuotas()
-                    ->whereHas('pagos')
-                    ->sum('monto');
-    }
-
-    /**
-     * Accessor para calcular el saldo pendiente
-     */
-    public function getSaldoPendienteAttribute(): float
-    {
-        return $this->monto_total - $this->monto_pagado;
     }
 
     /**
@@ -81,15 +65,24 @@ class PlanPagos extends Model
      */
     public function getEstaCompletoAttribute(): bool
     {
-        return $this->saldo_pendiente <= 0;
+        return $this->cuotas()->whereDoesntHave('pagos')->count() === 0;
     }
 
     /**
-     * Accessor para obtener el porcentaje pagado
+     * Accessor para obtener monto pagado
      */
-    public function getPorcentajePagadoAttribute(): float
+    public function getMontoPagadoAttribute(): float
     {
-        if ($this->monto_total == 0) return 0;
-        return ($this->monto_pagado / $this->monto_total) * 100;
+        return $this->cuotas()->with('pagos')->get()->sum(function($cuota) {
+            return $cuota->pagos->sum('monto');
+        });
+    }
+
+    /**
+     * Accessor para obtener monto pendiente
+     */
+    public function getMontoPendienteAttribute(): float
+    {
+        return $this->monto_total - $this->monto_pagado;
     }
 }

@@ -10,10 +10,11 @@ use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 use App\Models\Traits\Authenticatable;
 
-class Estudiante extends Usuario implements AuthenticatableContract, JWTSubject
+class Estudiante extends Persona implements AuthenticatableContract, JWTSubject
 {
     use Authenticatable;
-    protected $table = 'Estudiante';
+    protected $table = 'estudiante';
+    protected $primaryKey = 'registro_estudiante';
 
     protected $fillable = [
         'ci',
@@ -23,64 +24,39 @@ class Estudiante extends Usuario implements AuthenticatableContract, JWTSubject
         'fecha_nacimiento',
         'direccion',
         'fotografia',
-        'registro_estudiante',
-        'provincia',
-        'Estado_id',
-        'password'
-    ];
-
-    protected $hidden = [
-        'password'
+        'email',
+        'telefono_fijo',
+        'genero',
+        'estado_civil',
+        'nacionalidad',
+        'lugar_nacimiento',
+        'provincia'
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'fecha_nacimiento' => 'date',
-        'Estado_id' => 'integer'
+        'registro_estudiante' => 'integer'
     ];
-
-    /**
-     * Relación con estado del estudiante
-     */
-    public function estado(): BelongsTo
-    {
-        return $this->belongsTo(EstadoEstudiante::class, 'Estado_id');
-    }
 
     /**
      * Relación con inscripciones
      */
     public function inscripciones(): HasMany
     {
-        return $this->hasMany(Inscripcion::class, 'Estudiante_id');
+        return $this->hasMany(Inscripcion::class, 'registro_estudiante', 'registro_estudiante');
     }
 
     /**
-     * Relación con documentos
+     * Relación con documentos (heredada de Persona)
+     * Los documentos ahora se manejan a través de la relación con Persona
      */
-    public function documentos(): HasMany
-    {
-        return $this->hasMany(Documento::class, 'estudiante_id');
-    }
 
     /**
      * Relación con grupos (many-to-many)
      */
     public function grupos(): BelongsToMany
     {
-        return $this->belongsToMany(Grupo::class, 'grupo_estudiante', 'Estudiante_id', 'Grupo_id')
-                    ->withPivot(['nota', 'estado'])
-                    ->withTimestamps();
-    }
-
-    /**
-     * Scope para estudiantes activos
-     */
-    public function scopeActivos($query)
-    {
-        return $query->whereHas('estado', function($q) {
-            $q->where('nombre_estado', 'Activo');
-        });
+        return $this->belongsToMany(Grupo::class, 'grupo_estudiante', 'registro_estudiante', 'grupo_id', 'registro_estudiante', 'grupo_id')
+                    ->withPivot(['nota', 'estado']);
     }
 
     /**
@@ -126,8 +102,7 @@ class Estudiante extends Usuario implements AuthenticatableContract, JWTSubject
         return [
             'rol' => 'ESTUDIANTE',
             'ci' => $this->ci,
-            'registro' => $this->registro_estudiante,
-            'estado_id' => $this->Estado_id
+            'registro' => $this->registro_estudiante
         ];
     }
 
@@ -136,6 +111,6 @@ class Estudiante extends Usuario implements AuthenticatableContract, JWTSubject
      */
     public function getAuthPassword()
     {
-        return $this->password;
+        return null; // Los estudiantes no tienen password en esta estructura
     }
 }

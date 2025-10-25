@@ -7,15 +7,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class RamaAcademica extends Model
 {
-    protected $table = 'Rama_academica';
+    protected $table = 'rama_academica';
     protected $primaryKey = 'id';
 
     protected $fillable = [
         'nombre'
-    ];
-
-    protected $casts = [
-        'id' => 'integer'
     ];
 
     /**
@@ -23,7 +19,7 @@ class RamaAcademica extends Model
      */
     public function programas(): HasMany
     {
-        return $this->hasMany(Programa::class, 'Rama_academica_id');
+        return $this->hasMany(Programa::class, 'rama_academica_id', 'id');
     }
 
     /**
@@ -32,17 +28,5 @@ class RamaAcademica extends Model
     public function scopePorNombre($query, string $nombre)
     {
         return $query->where('nombre', 'ILIKE', "%{$nombre}%");
-    }
-
-    /**
-     * Scope para ramas con programas activos
-     */
-    public function scopeConProgramasActivos($query)
-    {
-        return $query->whereHas('programas', function($q) {
-            $q->whereHas('institucion', function($q2) {
-                $q2->where('estado', 1);
-            });
-        });
     }
 }

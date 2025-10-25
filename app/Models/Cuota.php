@@ -20,10 +20,10 @@ class Cuota extends Model
 
     protected $casts = [
         'id' => 'integer',
+        'plan_pagos_id' => 'integer',
         'fecha_ini' => 'date',
         'fecha_fin' => 'date',
-        'monto' => 'decimal:2',
-        'plan_pagos_id' => 'integer'
+        'monto' => 'decimal:2'
     ];
 
     /**
@@ -31,7 +31,7 @@ class Cuota extends Model
      */
     public function planPagos(): BelongsTo
     {
-        return $this->belongsTo(PlanPagos::class, 'plan_pagos_id');
+        return $this->belongsTo(PlanPagos::class, 'plan_pagos_id', 'id');
     }
 
     /**
@@ -39,7 +39,15 @@ class Cuota extends Model
      */
     public function pagos(): HasMany
     {
-        return $this->hasMany(Pago::class, 'cuotas_id');
+        return $this->hasMany(Pago::class, 'cuota_id', 'id');
+    }
+
+    /**
+     * Scope para cuotas pendientes
+     */
+    public function scopePendientes($query)
+    {
+        return $query->whereDoesntHave('pagos');
     }
 
     /**
@@ -52,36 +60,13 @@ class Cuota extends Model
     }
 
     /**
-     * Scope para cuotas pendientes
+     * Scope para cuotas por vencer
      */
-    public function scopePendientes($query)
+    public function scopePorVencer($query, int $dias = 7)
     {
-        return $query->where('fecha_fin', '>=', now())
+        return $query->where('fecha_fin', '<=', now()->addDays($dias))
+                    ->where('fecha_fin', '>', now())
                     ->whereDoesntHave('pagos');
-    }
-
-    /**
-     * Scope para cuotas pagadas
-     */
-    public function scopePagadas($query)
-    {
-        return $query->whereHas('pagos');
-    }
-
-    /**
-     * Scope para cuotas por plan
-     */
-    public function scopePorPlan($query, int $planId)
-    {
-        return $query->where('plan_pagos_id', $planId);
-    }
-
-    /**
-     * Accessor para verificar si está vencida
-     */
-    public function getEstaVencidaAttribute(): bool
-    {
-        return $this->fecha_fin < now() && !$this->pagos()->exists();
     }
 
     /**
@@ -93,15 +78,7 @@ class Cuota extends Model
     }
 
     /**
-     * Accessor para verificar si está pendiente
-     */
-    public function getEstaPendienteAttribute(): bool
-    {
-        return !$this->esta_vencida && !$this->esta_pagada;
-    }
-
-    /**
-     * Accessor para obtener el monto pagado
+     * Accessor para obtener monto pagado
      */
     public function getMontoPagadoAttribute(): float
     {
@@ -109,10 +86,18 @@ class Cuota extends Model
     }
 
     /**
-     * Accessor para obtener el saldo pendiente
+     * Accessor para obtener saldo pendiente
      */
     public function getSaldoPendienteAttribute(): float
     {
         return $this->monto - $this->monto_pagado;
+    }
+
+    /**
+     * Accessor para verificar si está vencida
+     */
+    public function getEstaVencidaAttribute(): bool
+    {
+        return $this->fecha_fin < now() && !$this->esta_pagada;
     }
 }

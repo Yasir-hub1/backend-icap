@@ -9,34 +9,21 @@ use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 use App\Models\Traits\Authenticatable;
 
-class Docente extends Usuario implements AuthenticatableContract, JWTSubject
+class Docente extends Persona implements AuthenticatableContract, JWTSubject
 {
     use Authenticatable;
-    protected $table = 'Docente';
+    protected $table = 'docente';
+    protected $primaryKey = 'registro_docente';
 
     protected $fillable = [
-        'ci',
-        'nombre',
-        'apellido',
-        'celular',
-        'fecha_nacimiento',
-        'direccion',
-        'fotografia',
         'registro_docente',
         'cargo',
         'area_de_especializacion',
-        'modalidad_de_contratacion',
-        'password',
-        'rol'
-    ];
-
-    protected $hidden = [
-        'password'
+        'modalidad_de_contratacion'
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'fecha_nacimiento' => 'date'
+        'registro_docente' => 'integer'
     ];
 
     /**
@@ -44,7 +31,7 @@ class Docente extends Usuario implements AuthenticatableContract, JWTSubject
      */
     public function grupos(): HasMany
     {
-        return $this->hasMany(Grupo::class, 'Docente_id');
+        return $this->hasMany(Grupo::class, 'registro_docente', 'registro_docente');
     }
 
     /**
@@ -52,16 +39,8 @@ class Docente extends Usuario implements AuthenticatableContract, JWTSubject
      */
     public function programas(): BelongsToMany
     {
-        return $this->belongsToMany(Programa::class, 'Grupo', 'Docente_id', 'Programa_id')
+        return $this->belongsToMany(Programa::class, 'Grupo', 'registro_docente', 'id')
                     ->distinct();
-    }
-
-    /**
-     * Scope para docentes activos
-     */
-    public function scopeActivos($query)
-    {
-        return $query->whereNotNull('registro_docente');
     }
 
     /**
@@ -118,7 +97,7 @@ class Docente extends Usuario implements AuthenticatableContract, JWTSubject
     public function getJWTCustomClaims()
     {
         return [
-            'rol' => $this->rol ?? 'DOCENTE',
+            'rol' => 'DOCENTE',
             'ci' => $this->ci,
             'registro' => $this->registro_docente
         ];
@@ -129,6 +108,6 @@ class Docente extends Usuario implements AuthenticatableContract, JWTSubject
      */
     public function getAuthPassword()
     {
-        return $this->password;
+        return null; // Los docentes no tienen password en esta estructura
     }
 }

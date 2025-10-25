@@ -5,52 +5,31 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Grupo extends Model
 {
-    protected $table = 'Grupo';
-    protected $primaryKey = 'id';
+    protected $table = 'grupo';
+    protected $primaryKey = 'grupo_id';
 
     protected $fillable = [
         'fecha_ini',
         'fecha_fin',
-        'Programa_id',
-        'Docente_id',
-        'horario_id'
+        'registro_docente'
     ];
 
     protected $casts = [
-        'id' => 'integer',
+        'grupo_id' => 'integer',
+        'registro_docente' => 'integer',
         'fecha_ini' => 'date',
-        'fecha_fin' => 'date',
-        'Programa_id' => 'integer',
-        'Docente_id' => 'integer',
-        'horario_id' => 'integer'
+        'fecha_fin' => 'date'
     ];
-
-    /**
-     * Relación con programa
-     */
-    public function programa(): BelongsTo
-    {
-        return $this->belongsTo(Programa::class, 'Programa_id');
-    }
 
     /**
      * Relación con docente
      */
     public function docente(): BelongsTo
     {
-        return $this->belongsTo(Docente::class, 'Docente_id');
-    }
-
-    /**
-     * Relación con horario
-     */
-    public function horario(): BelongsTo
-    {
-        return $this->belongsTo(Horario::class, 'horario_id');
+        return $this->belongsTo(Docente::class, 'registro_docente', 'registro_docente');
     }
 
     /**
@@ -58,29 +37,17 @@ class Grupo extends Model
      */
     public function estudiantes(): BelongsToMany
     {
-        return $this->belongsToMany(Estudiante::class, 'grupo_estudiante', 'Grupo_id', 'Estudiante_id')
-                    ->withPivot(['nota', 'estado'])
-                    ->withTimestamps();
+        return $this->belongsToMany(Estudiante::class, 'grupo_estudiante', 'grupo_id', 'registro_estudiante', 'grupo_id', 'registro_estudiante')
+                    ->withPivot(['nota', 'estado']);
     }
 
     /**
-     * Relación con horarios adicionales (many-to-many)
+     * Relación con horarios (many-to-many)
      */
-    public function horariosAdicionales(): BelongsToMany
+    public function horarios(): BelongsToMany
     {
-        return $this->belongsToMany(Horario::class, 'Grupo_horario', 'Grupo_id', 'Horario_id')
-                    ->withPivot('aula')
-                    ->withTimestamps();
-    }
-
-    /**
-     * Relación con estudiantes a través de grupo_estudiante
-     */
-    public function estudiantesGrupo(): BelongsToMany
-    {
-        return $this->belongsToMany(Estudiante::class, 'grupo_estudiante', 'Grupo_id', 'Estudiante_id')
-                    ->withPivot(['nota', 'estado'])
-                    ->withTimestamps();
+        return $this->belongsToMany(Horario::class, 'Grupo_horario', 'grupo_id', 'horario_id', 'grupo_id', 'horario_id')
+                    ->withPivot('aula');
     }
 
     /**
@@ -100,19 +67,11 @@ class Grupo extends Model
     }
 
     /**
-     * Scope para grupos por programa
-     */
-    public function scopePorPrograma($query, int $programaId)
-    {
-        return $query->where('Programa_id', $programaId);
-    }
-
-    /**
      * Scope para grupos por docente
      */
     public function scopePorDocente($query, int $docenteId)
     {
-        return $query->where('Docente_id', $docenteId);
+        return $query->where('registro_docente', $docenteId);
     }
 
     /**

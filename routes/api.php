@@ -64,9 +64,11 @@ Route::prefix('auth')->group(function () {
     // Admin/Docente
     Route::post('/admin/login', [AutenticacionAdminController::class, 'iniciarSesion']);
 
+    // Logout público (no requiere autenticación)
+    Route::post('/logout', [AutenticacionEstudianteController::class, 'cerrarSesion']);
+
     // Rutas protegidas (requieren JWT)
     Route::middleware('auth:api')->group(function () {
-        Route::post('/logout', [AutenticacionEstudianteController::class, 'cerrarSesion']);
         Route::post('/refresh', [AutenticacionEstudianteController::class, 'refrescarToken']);
         Route::get('/perfil', [AutenticacionEstudianteController::class, 'obtenerPerfil']);
     });

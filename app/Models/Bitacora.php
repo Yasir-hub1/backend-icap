@@ -7,21 +7,22 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Bitacora extends Model
 {
-    protected $table = 'Bitacora';
-    protected $primaryKey = 'id';
+    protected $table = 'bitacora';
+    protected $primaryKey = 'bitacora_id';
+    public $timestamps = false;
 
     protected $fillable = [
         'fecha_hora',
         'tabla',
-        'codTable',
+        'cod_tabla',
         'transaccion',
-        'Usuario_id'
+        'usuario_id'
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'fecha_hora' => 'datetime',
-        'Usuario_id' => 'integer'
+        'Bitacora_id' => 'integer',
+        'usuario_id' => 'integer',
+        'fecha_hora' => 'datetime'
     ];
 
     /**
@@ -29,19 +30,11 @@ class Bitacora extends Model
      */
     public function usuario(): BelongsTo
     {
-        return $this->belongsTo(Usuario::class, 'Usuario_id');
+        return $this->belongsTo(Usuario::class, 'usuario_id', 'usuario_id');
     }
 
     /**
-     * Scope para bitácoras recientes
-     */
-    public function scopeRecientes($query, int $dias = 30)
-    {
-        return $query->where('fecha_hora', '>=', now()->subDays($dias));
-    }
-
-    /**
-     * Scope para bitácoras por tabla
+     * Scope para buscar por tabla
      */
     public function scopePorTabla($query, string $tabla)
     {
@@ -49,15 +42,7 @@ class Bitacora extends Model
     }
 
     /**
-     * Scope para bitácoras por usuario
-     */
-    public function scopePorUsuario($query, int $usuarioId)
-    {
-        return $query->where('Usuario_id', $usuarioId);
-    }
-
-    /**
-     * Scope para bitácoras por transacción
+     * Scope para buscar por transacción
      */
     public function scopePorTransaccion($query, string $transaccion)
     {
@@ -65,10 +50,18 @@ class Bitacora extends Model
     }
 
     /**
-     * Scope para bitácoras por rango de fechas
+     * Scope para buscar por usuario
      */
-    public function scopePorRangoFechas($query, $fechaInicio, $fechaFin)
+    public function scopePorUsuario($query, int $usuarioId)
     {
-        return $query->whereBetween('fecha_hora', [$fechaInicio, $fechaFin]);
+        return $query->where('usuario_id', $usuarioId);
+    }
+
+    /**
+     * Scope para fechas recientes
+     */
+    public function scopeRecientes($query, int $dias = 30)
+    {
+        return $query->where('fecha_hora', '>=', now()->subDays($dias));
     }
 }

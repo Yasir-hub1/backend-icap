@@ -7,17 +7,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Version extends Model
 {
-    protected $table = 'Version';
+    protected $table = 'version';
     protected $primaryKey = 'id';
 
     protected $fillable = [
         'nombre',
-        'anio'
+        'año'
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'anio' => 'integer'
+        'año' => 'integer'
     ];
 
     /**
@@ -25,7 +24,7 @@ class Version extends Model
      */
     public function programas(): HasMany
     {
-        return $this->hasMany(Programa::class, 'version_id');
+        return $this->hasMany(Programa::class, 'version_id', 'id');
     }
 
     /**
@@ -37,30 +36,18 @@ class Version extends Model
     }
 
     /**
-     * Scope para versiones por año
+     * Scope para buscar por año
      */
-    public function scopePorAnio($query, int $anio)
+    public function scopePorAño($query, int $año)
     {
-        return $query->where('anio', $anio);
+        return $query->where('año', $año);
     }
 
     /**
      * Scope para versiones recientes
      */
-    public function scopeRecientes($query, int $anios = 5)
+    public function scopeRecientes($query)
     {
-        return $query->where('anio', '>=', now()->year - $anios);
-    }
-
-    /**
-     * Scope para versiones con programas activos
-     */
-    public function scopeConProgramasActivos($query)
-    {
-        return $query->whereHas('programas', function($q) {
-            $q->whereHas('institucion', function($q2) {
-                $q2->where('estado', 1);
-            });
-        });
+        return $query->where('año', '>=', now()->year - 2);
     }
 }

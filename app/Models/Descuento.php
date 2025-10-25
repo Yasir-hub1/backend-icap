@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Descuento extends Model
 {
-    protected $table = 'Descuento';
+    protected $table = 'descuento';
     protected $primaryKey = 'id';
 
     protected $fillable = [
@@ -16,7 +16,6 @@ class Descuento extends Model
     ];
 
     protected $casts = [
-        'id' => 'integer',
         'descuento' => 'decimal:2'
     ];
 
@@ -25,15 +24,7 @@ class Descuento extends Model
      */
     public function inscripciones(): HasMany
     {
-        return $this->hasMany(Inscripcion::class, 'Descuento_id');
-    }
-
-    /**
-     * Scope para buscar por nombre
-     */
-    public function scopePorNombre($query, string $nombre)
-    {
-        return $query->where('nombre', 'ILIKE', "%{$nombre}%");
+        return $this->hasMany(Inscripcion::class, 'descuento_id', 'id');
     }
 
     /**
@@ -45,9 +36,17 @@ class Descuento extends Model
     }
 
     /**
-     * Scope para descuentos por porcentaje mínimo
+     * Scope para buscar por nombre
      */
-    public function scopePorcentajeMinimo($query, float $porcentaje)
+    public function scopePorNombre($query, string $nombre)
+    {
+        return $query->where('nombre', 'ILIKE', "%{$nombre}%");
+    }
+
+    /**
+     * Scope para buscar por porcentaje mínimo
+     */
+    public function scopePorPorcentajeMinimo($query, float $porcentaje)
     {
         return $query->where('descuento', '>=', $porcentaje);
     }

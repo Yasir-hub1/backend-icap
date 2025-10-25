@@ -7,16 +7,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TipoDocumento extends Model
 {
-    protected $table = 'Tipo_documento';
-    protected $primaryKey = 'id';
+    protected $table = 'tipo_documento';
+    protected $primaryKey = 'Tipo_documento_id';
 
     protected $fillable = [
-        'nombre_entidad',
-        'descripcion'
-    ];
-
-    protected $casts = [
-        'id' => 'integer'
+        'nombre_entidad'
     ];
 
     /**
@@ -24,7 +19,7 @@ class TipoDocumento extends Model
      */
     public function documentos(): HasMany
     {
-        return $this->hasMany(Documento::class, 'Tipo_documento_id');
+        return $this->hasMany(Documento::class, 'tipo_documento', 'Tipo_documento_id');
     }
 
     /**
@@ -33,15 +28,5 @@ class TipoDocumento extends Model
     public function scopePorNombre($query, string $nombre)
     {
         return $query->where('nombre_entidad', 'ILIKE', "%{$nombre}%");
-    }
-
-    /**
-     * Scope para tipos con documentos activos
-     */
-    public function scopeConDocumentosActivos($query)
-    {
-        return $query->whereHas('documentos', function($q) {
-            $q->where('estado', 1);
-        });
     }
 }

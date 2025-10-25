@@ -7,8 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Modulo extends Model
 {
-    protected $table = 'Modulo';
-    protected $primaryKey = 'id';
+    protected $table = 'modulo';
+    protected $primaryKey = 'modulo_id';
 
     protected $fillable = [
         'nombre',
@@ -17,7 +17,7 @@ class Modulo extends Model
     ];
 
     protected $casts = [
-        'id' => 'integer',
+        'modulo_id' => 'integer',
         'credito' => 'integer',
         'horas_academicas' => 'integer'
     ];
@@ -27,9 +27,8 @@ class Modulo extends Model
      */
     public function programas(): BelongsToMany
     {
-        return $this->belongsToMany(Programa::class, 'Programa_modulo', 'Modulo_id', 'Programa_id')
-                    ->withPivot('edicion')
-                    ->withTimestamps();
+        return $this->belongsToMany(Programa::class, 'Programa_modulo', 'modulo_id', 'programa_id', 'modulo_id', 'id')
+                    ->withPivot('estado');
     }
 
     /**
@@ -41,18 +40,18 @@ class Modulo extends Model
     }
 
     /**
-     * Scope para módulos con créditos
+     * Scope para módulos por créditos
      */
-    public function scopeConCreditos($query)
+    public function scopePorCreditos($query, int $creditos)
     {
-        return $query->whereNotNull('credito')->where('credito', '>', 0);
+        return $query->where('credito', $creditos);
     }
 
     /**
      * Scope para módulos por horas académicas
      */
-    public function scopePorHoras($query, int $horasMinimas)
+    public function scopePorHoras($query, int $horas)
     {
-        return $query->where('horas_academicas', '>=', $horasMinimas);
+        return $query->where('horas_academicas', $horas);
     }
 }

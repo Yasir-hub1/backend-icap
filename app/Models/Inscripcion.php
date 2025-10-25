@@ -5,42 +5,31 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Inscripcion extends Model
 {
-    protected $table = 'Inscripcion';
+    protected $table = 'inscripcion';
     protected $primaryKey = 'id';
 
     protected $fillable = [
         'fecha',
-        'Programa_id',
-        'Estudiante_id',
-        'Descuento_id'
+        'registro_estudiante',
+        'descuento_id'
     ];
 
     protected $casts = [
         'id' => 'integer',
-        'fecha' => 'datetime',
-        'Programa_id' => 'integer',
-        'Estudiante_id' => 'integer',
-        'Descuento_id' => 'integer'
+        'registro_estudiante' => 'integer',
+        'descuento_id' => 'integer',
+        'fecha' => 'date'
     ];
-
-    /**
-     * Relación con programa
-     */
-    public function programa(): BelongsTo
-    {
-        return $this->belongsTo(Programa::class, 'Programa_id');
-    }
 
     /**
      * Relación con estudiante
      */
     public function estudiante(): BelongsTo
     {
-        return $this->belongsTo(Estudiante::class, 'Estudiante_id');
+        return $this->belongsTo(Estudiante::class, 'registro_estudiante', 'registro_estudiante');
     }
 
     /**
@@ -48,7 +37,7 @@ class Inscripcion extends Model
      */
     public function descuento(): BelongsTo
     {
-        return $this->belongsTo(Descuento::class, 'Descuento_id');
+        return $this->belongsTo(Descuento::class, 'descuento_id', 'id');
     }
 
     /**
@@ -56,15 +45,7 @@ class Inscripcion extends Model
      */
     public function planPagos(): HasOne
     {
-        return $this->hasOne(PlanPagos::class, 'Inscripcion_id');
-    }
-
-    /**
-     * Relación con pagos (a través de plan de pagos)
-     */
-    public function pagos(): HasMany
-    {
-        return $this->hasManyThrough(Pago::class, PlanPagos::class, 'Inscripcion_id', 'cuotas_id');
+        return $this->hasOne(PlanPagos::class, 'inscripcion_id', 'id');
     }
 
     /**
@@ -76,41 +57,26 @@ class Inscripcion extends Model
     }
 
     /**
-     * Scope para inscripciones por programa
-     */
-    public function scopePorPrograma($query, int $programaId)
-    {
-        return $query->where('Programa_id', $programaId);
-    }
-
-    /**
      * Scope para inscripciones por estudiante
      */
     public function scopePorEstudiante($query, int $estudianteId)
     {
-        return $query->where('Estudiante_id', $estudianteId);
+        return $query->where('registro_estudiante', $estudianteId);
     }
 
     /**
-     * Accessor para calcular el costo final con descuento
+     * Scope para inscripciones con descuento
      */
-    public function getCostoFinalAttribute(): float
+    public function scopeConDescuento($query)
     {
-        $costoBase = $this->programa->costo;
-
-        if ($this->descuento) {
-            $descuento = $costoBase * ($this->descuento->descuento / 100);
-            return $costoBase - $descuento;
-        }
-
-        return $costoBase;
+        return $query->whereNotNull('descuento_id');
     }
 
     /**
-     * Accessor para verificar si tiene plan de pagos
+     * Scope para inscripciones sin descuento
      */
-    public function getTienePlanPagosAttribute(): bool
+    public function scopeSinDescuento($query)
     {
-        return $this->planPagos()->exists();
+        return $query->whereNull('descuento_id');
     }
 }

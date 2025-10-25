@@ -4,68 +4,75 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Usuario extends Model
 {
-    protected $table = 'Usuario';
-    protected $primaryKey = 'id';
+    protected $table = 'usuario';
+    protected $primaryKey = 'usuario_id';
+    public $timestamps = false;
 
     protected $fillable = [
-        'ci',
-        'nombre',
-        'apellido',
-        'celular',
-        'fecha_nacimiento',
-        'direccion',
-        'fotografia',
-        'clave'
+        'email',
+        'password',
+        'persona_id'
+    ];
+
+    protected $hidden = [
+        'password'
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'fecha_nacimiento' => 'date'
+        'usuario_id' => 'integer',
+        'persona_id' => 'integer'
     ];
+
+    /**
+     * Relación con persona (0..1:1)
+     * Un usuario pertenece a una persona
+     */
+    public function persona(): BelongsTo
+    {
+        return $this->belongsTo(Persona::class, 'persona_id', 'persona_id');
+    }
 
     /**
      * Relación con bitácora
      */
     public function bitacoras(): HasMany
     {
-        return $this->hasMany(Bitacora::class, 'Usuario_id');
+        return $this->hasMany(Bitacora::class, 'usuario_id', 'usuario_id');
     }
 
     /**
-     * Scope para buscar por CI
+     * Scope para buscar por persona
      */
-    public function scopePorCi($query, string $ci)
+    public function scopePorPersona($query, int $personaId)
     {
-        return $query->where('ci', $ci);
+        return $query->where('persona_id', $personaId);
     }
 
     /**
-     * Scope para buscar por nombre completo
+     * Scope para buscar por email
      */
-    public function scopePorNombre($query, string $nombre)
+    public function scopePorEmail($query, string $email)
     {
-        return $query->where(function($q) use ($nombre) {
-            $q->where('nombre', 'ILIKE', "%{$nombre}%")
-              ->orWhere('apellido', 'ILIKE', "%{$nombre}%");
-        });
+        return $query->where('email', $email);
     }
 
     /**
-     * Accessor para nombre completo
+     * Accessor para nombre completo (delegado a persona)
      */
     public function getNombreCompletoAttribute(): string
     {
-        return "{$this->nombre} {$this->apellido}";
+        return $this->persona ? $this->persona->nombre_completo : 'Sin persona asociada';
     }
 
     /**
-     * Accessor para edad
+     * Accessor para edad (delegado a persona)
      */
     public function getEdadAttribute(): ?int
     {
-        return $this->fecha_nacimiento ? $this->fecha_nacimiento->age : null;
+        return $this->persona ? $this->persona->edad : null;
     }
 }

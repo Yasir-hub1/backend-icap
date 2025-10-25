@@ -7,16 +7,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TipoConvenio extends Model
 {
-    protected $table = 'Tipo_convenio';
-    protected $primaryKey = 'id';
+    protected $table = 'tipo_convenio';
+    protected $primaryKey = 'tipo_convenio_id';
 
     protected $fillable = [
         'nombre_tipo',
         'descripcion'
-    ];
-
-    protected $casts = [
-        'id' => 'integer'
     ];
 
     /**
@@ -24,7 +20,7 @@ class TipoConvenio extends Model
      */
     public function convenios(): HasMany
     {
-        return $this->hasMany(Convenio::class, 'Tipo_convenio_id');
+        return $this->hasMany(Convenio::class, 'tipo_convenio_id', 'tipo_convenio_id');
     }
 
     /**
@@ -33,16 +29,5 @@ class TipoConvenio extends Model
     public function scopePorNombre($query, string $nombre)
     {
         return $query->where('nombre_tipo', 'ILIKE', "%{$nombre}%");
-    }
-
-    /**
-     * Scope para tipos con convenios activos
-     */
-    public function scopeConConveniosActivos($query)
-    {
-        return $query->whereHas('convenios', function($q) {
-            $q->where('estado', 1)
-              ->where('fecha_fin', '>=', now());
-        });
     }
 }

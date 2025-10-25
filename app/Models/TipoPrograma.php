@@ -7,15 +7,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TipoPrograma extends Model
 {
-    protected $table = 'Tipo_programa';
+    protected $table = 'tipo_programa';
     protected $primaryKey = 'id';
+    public $timestamps = false;
 
     protected $fillable = [
         'nombre'
-    ];
-
-    protected $casts = [
-        'id' => 'integer'
     ];
 
     /**
@@ -23,7 +20,7 @@ class TipoPrograma extends Model
      */
     public function programas(): HasMany
     {
-        return $this->hasMany(Programa::class, 'Tipo_programa_id');
+        return $this->hasMany(Programa::class, 'tipo_programa_id', 'id');
     }
 
     /**
@@ -32,17 +29,5 @@ class TipoPrograma extends Model
     public function scopePorNombre($query, string $nombre)
     {
         return $query->where('nombre', 'ILIKE', "%{$nombre}%");
-    }
-
-    /**
-     * Scope para tipos con programas activos
-     */
-    public function scopeConProgramasActivos($query)
-    {
-        return $query->whereHas('programas', function($q) {
-            $q->whereHas('institucion', function($q2) {
-                $q2->where('estado', 1);
-            });
-        });
     }
 }

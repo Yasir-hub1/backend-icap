@@ -45,7 +45,7 @@ class PanelEstudianteController extends Controller
                                 ->join('plan_pagos', 'cuotas.plan_pagos_id', '=', 'plan_pagos.id')
                                 ->join('Inscripcion', 'plan_pagos.Inscripcion_id', '=', 'Inscripcion.id')
                                 ->leftJoin('pagos', 'cuotas.id', '=', 'pagos.cuotas_id')
-                                ->where('Inscripcion.Estudiante_id', $estudiante->id')
+                                ->where('Inscripcion.Estudiante_id', $estudiante->id)
                                 ->whereNull('pagos.id')
                                 ->count();
 

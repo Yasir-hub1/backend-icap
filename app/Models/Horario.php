@@ -3,13 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Horario extends Model
 {
-    protected $table = 'Horario';
-    protected $primaryKey = 'id';
+    protected $table = 'horario';
+    protected $primaryKey = 'horario_id';
 
     protected $fillable = [
         'dias',
@@ -18,27 +17,18 @@ class Horario extends Model
     ];
 
     protected $casts = [
-        'id' => 'integer',
+        'horario_id' => 'integer',
         'hora_ini' => 'datetime:H:i',
         'hora_fin' => 'datetime:H:i'
     ];
 
     /**
-     * Relación con grupos
+     * Relación con grupos (many-to-many)
      */
-    public function grupos(): HasMany
+    public function grupos(): BelongsToMany
     {
-        return $this->hasMany(Grupo::class, 'horario_id');
-    }
-
-    /**
-     * Relación con grupos adicionales (many-to-many)
-     */
-    public function gruposAdicionales(): BelongsToMany
-    {
-        return $this->belongsToMany(Grupo::class, 'Grupo_horario', 'Horario_id', 'Grupo_id')
-                    ->withPivot('aula')
-                    ->withTimestamps();
+        return $this->belongsToMany(Grupo::class, 'Grupo_horario', 'horario_id', 'grupo_id', 'horario_id', 'grupo_id')
+                    ->withPivot('aula');
     }
 
     /**
@@ -50,38 +40,20 @@ class Horario extends Model
     }
 
     /**
-     * Scope para horarios en rango de horas
+     * Scope para buscar por turno
      */
-    public function scopeEnRangoHoras($query, $horaInicio, $horaFin)
+    public function scopePorTurno($query, string $turno)
     {
-        return $query->where('hora_ini', '>=', $horaInicio)
-                    ->where('hora_fin', '<=', $horaFin);
-    }
-
-    /**
-     * Scope para horarios matutinos
-     */
-    public function scopeMatutinos($query)
-    {
-        return $query->where('hora_ini', '>=', '06:00:00')
-                    ->where('hora_ini', '<', '12:00:00');
-    }
-
-    /**
-     * Scope para horarios vespertinos
-     */
-    public function scopeVespertinos($query)
-    {
-        return $query->where('hora_ini', '>=', '12:00:00')
-                    ->where('hora_ini', '<', '18:00:00');
-    }
-
-    /**
-     * Scope para horarios nocturnos
-     */
-    public function scopeNocturnos($query)
-    {
-        return $query->where('hora_ini', '>=', '18:00:00');
+        switch (strtolower($turno)) {
+            case 'mañana':
+                return $query->where('hora_ini', '>=', '06:00')->where('hora_ini', '<', '12:00');
+            case 'tarde':
+                return $query->where('hora_ini', '>=', '12:00')->where('hora_ini', '<', '18:00');
+            case 'noche':
+                return $query->where('hora_ini', '>=', '18:00');
+            default:
+                return $query;
+        }
     }
 
     /**
@@ -90,25 +62,5 @@ class Horario extends Model
     public function getDuracionHorasAttribute(): float
     {
         return $this->hora_ini->diffInHours($this->hora_fin);
-    }
-
-    /**
-     * Accessor para obtener el horario formateado
-     */
-    public function getHorarioFormateadoAttribute(): string
-    {
-        return "{$this->hora_ini->format('H:i')} - {$this->hora_fin->format('H:i')}";
-    }
-
-    /**
-     * Accessor para obtener el turno
-     */
-    public function getTurnoAttribute(): string
-    {
-        $hora = $this->hora_ini->hour;
-
-        if ($hora < 12) return 'Matutino';
-        if ($hora < 18) return 'Vespertino';
-        return 'Nocturno';
     }
 }

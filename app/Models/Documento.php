@@ -7,8 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Documento extends Model
 {
-    protected $table = 'Documentos';
-    protected $primaryKey = 'id';
+    protected $table = 'documentos';
+    protected $primaryKey = 'documento_id';
 
     protected $fillable = [
         'nombre_documento',
@@ -16,17 +16,16 @@ class Documento extends Model
         'path_documento',
         'estado',
         'observaciones',
-        'Tipo_documento_id',
-        'convenio_id',
-        'estudiante_id'
+        'tipo_documento',
+        'persona_id',
+        'convenio_id'
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'estado' => 'integer',
-        'Tipo_documento_id' => 'integer',
-        'convenio_id' => 'integer',
-        'estudiante_id' => 'integer'
+        'documento_id' => 'integer',
+        'tipo_documento' => 'integer',
+        'persona_id' => 'integer',
+        'convenio_id' => 'integer'
     ];
 
     /**
@@ -34,7 +33,7 @@ class Documento extends Model
      */
     public function tipoDocumento(): BelongsTo
     {
-        return $this->belongsTo(TipoDocumento::class, 'Tipo_documento_id');
+        return $this->belongsTo(TipoDocumento::class, 'tipo_documento', 'Tipo_documento_id');
     }
 
     /**
@@ -42,15 +41,15 @@ class Documento extends Model
      */
     public function convenio(): BelongsTo
     {
-        return $this->belongsTo(Convenio::class, 'convenio_id');
+        return $this->belongsTo(Convenio::class, 'convenio_id', 'convenio_id');
     }
 
     /**
-     * Relación con estudiante
+     * Relación con persona
      */
-    public function estudiante(): BelongsTo
+    public function persona(): BelongsTo
     {
-        return $this->belongsTo(Estudiante::class, 'estudiante_id');
+        return $this->belongsTo(Persona::class, 'persona_id', 'persona_id');
     }
 
     /**
@@ -74,15 +73,15 @@ class Documento extends Model
      */
     public function scopePorTipo($query, int $tipoId)
     {
-        return $query->where('Tipo_documento_id', $tipoId);
+        return $query->where('tipo_documento', $tipoId);
     }
 
     /**
-     * Scope para documentos por estudiante
+     * Scope para documentos por persona
      */
-    public function scopePorEstudiante($query, int $estudianteId)
+    public function scopePorPersona($query, int $personaId)
     {
-        return $query->where('estudiante_id', $estudianteId);
+        return $query->where('persona_id', $personaId);
     }
 
     /**

@@ -8,18 +8,17 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Provincia extends Model
 {
-    protected $table = 'Provincia';
+    protected $table = 'provincia';
     protected $primaryKey = 'id';
 
     protected $fillable = [
         'nombre_provincia',
         'codigo_provincia',
-        'Pais_id'
+        'pais_id'
     ];
 
     protected $casts = [
-        'id' => 'integer',
-        'Pais_id' => 'integer'
+        'pais_id' => 'integer'
     ];
 
     /**
@@ -27,7 +26,7 @@ class Provincia extends Model
      */
     public function pais(): BelongsTo
     {
-        return $this->belongsTo(Pais::class, 'Pais_id');
+        return $this->belongsTo(Pais::class, 'pais_id', 'id');
     }
 
     /**
@@ -35,7 +34,7 @@ class Provincia extends Model
      */
     public function ciudades(): HasMany
     {
-        return $this->hasMany(Ciudad::class, 'Provincia_id');
+        return $this->hasMany(Ciudad::class, 'provincia_id', 'id');
     }
 
     /**
@@ -47,10 +46,10 @@ class Provincia extends Model
     }
 
     /**
-     * Scope para provincias de un país específico
+     * Scope para buscar por país
      */
-    public function scopeDelPais($query, int $paisId)
+    public function scopePorPais($query, int $paisId)
     {
-        return $query->where('Pais_id', $paisId);
+        return $query->where('pais_id', $paisId);
     }
 }

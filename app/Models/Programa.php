@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Programa extends Model
 {
-    protected $table = 'Programa';
+    protected $table = 'programa';
     protected $primaryKey = 'id';
 
     protected $fillable = [
@@ -17,11 +17,10 @@ class Programa extends Model
         'duracion_meses',
         'total_modulos',
         'costo',
-        'Rama_academica_id',
-        'Tipo_programa_id',
-        'Programa_id',
-        'Institucion_id',
-        'version_id'
+        'version_id',
+        'rama_academica_id',
+        'tipo_programa_id',
+        'institucion_id'
     ];
 
     protected $casts = [
@@ -29,19 +28,26 @@ class Programa extends Model
         'duracion_meses' => 'integer',
         'total_modulos' => 'integer',
         'costo' => 'decimal:2',
-        'Rama_academica_id' => 'integer',
-        'Tipo_programa_id' => 'integer',
-        'Programa_id' => 'integer',
-        'Institucion_id' => 'integer',
-        'version_id' => 'integer'
+        'version_id' => 'integer',
+        'rama_academica_id' => 'integer',
+        'tipo_programa_id' => 'integer',
+        'institucion_id' => 'integer'
     ];
+
+    /**
+     * Relación con versión
+     */
+    public function version(): BelongsTo
+    {
+        return $this->belongsTo(Version::class, 'version_id', 'id');
+    }
 
     /**
      * Relación con rama académica
      */
     public function ramaAcademica(): BelongsTo
     {
-        return $this->belongsTo(RamaAcademica::class, 'Rama_academica_id');
+        return $this->belongsTo(RamaAcademica::class, 'rama_academica_id', 'id');
     }
 
     /**
@@ -49,7 +55,7 @@ class Programa extends Model
      */
     public function tipoPrograma(): BelongsTo
     {
-        return $this->belongsTo(TipoPrograma::class, 'Tipo_programa_id');
+        return $this->belongsTo(TipoPrograma::class, 'tipo_programa_id', 'id');
     }
 
     /**
@@ -57,57 +63,7 @@ class Programa extends Model
      */
     public function institucion(): BelongsTo
     {
-        return $this->belongsTo(Institucion::class, 'Institucion_id');
-    }
-
-    /**
-     * Relación con versión
-     */
-    public function version(): BelongsTo
-    {
-        return $this->belongsTo(Version::class, 'version_id');
-    }
-
-    /**
-     * Relación con programa padre (self-referencing directo)
-     */
-    public function programaPadre(): BelongsTo
-    {
-        return $this->belongsTo(Programa::class, 'Programa_id');
-    }
-
-    /**
-     * Relación con subprogramas (self-referencing directo)
-     */
-    public function subprogramas(): HasMany
-    {
-        return $this->hasMany(Programa::class, 'Programa_id');
-    }
-
-    /**
-     * Relación many-to-many con programas padre (Programa_subprograma)
-     */
-    public function programasPadre(): BelongsToMany
-    {
-        return $this->belongsToMany(Programa::class, 'Programa_subprograma', 'Programa_hijo_id', 'Programa_padre_id');
-    }
-
-    /**
-     * Relación many-to-many con programas hijo (Programa_subprograma)
-     */
-    public function programasHijo(): BelongsToMany
-    {
-        return $this->belongsToMany(Programa::class, 'Programa_subprograma', 'Programa_padre_id', 'Programa_hijo_id');
-    }
-
-    /**
-     * Relación con módulos (many-to-many)
-     */
-    public function modulos(): BelongsToMany
-    {
-        return $this->belongsToMany(Modulo::class, 'Programa_modulo', 'Programa_id', 'Modulo_id')
-                    ->withPivot('edicion')
-                    ->withTimestamps();
+        return $this->belongsTo(Institucion::class, 'institucion_id', 'id');
     }
 
     /**
@@ -115,7 +71,7 @@ class Programa extends Model
      */
     public function inscripciones(): HasMany
     {
-        return $this->hasMany(Inscripcion::class, 'Programa_id');
+        return $this->hasMany(Inscripcion::class, 'programa_id', 'id');
     }
 
     /**
@@ -123,7 +79,32 @@ class Programa extends Model
      */
     public function grupos(): HasMany
     {
-        return $this->hasMany(Grupo::class, 'Programa_id');
+        return $this->hasMany(Grupo::class, 'programa_id', 'id');
+    }
+
+    /**
+     * Relación con módulos (many-to-many)
+     */
+    public function modulos(): BelongsToMany
+    {
+        return $this->belongsToMany(Modulo::class, 'Programa_modulo', 'programa_id', 'modulo_id', 'id', 'modulo_id')
+                    ->withPivot('estado');
+    }
+
+    /**
+     * Relación con subprogramas (many-to-many)
+     */
+    public function subprogramas(): BelongsToMany
+    {
+        return $this->belongsToMany(Programa::class, 'Programa_subprograma', 'programa_id', 'subprograma_id', 'id', 'id');
+    }
+
+    /**
+     * Relación con programas padre (many-to-many)
+     */
+    public function programasPadre(): BelongsToMany
+    {
+        return $this->belongsToMany(Programa::class, 'Programa_subprograma', 'subprograma_id', 'programa_id', 'id', 'id');
     }
 
     /**
@@ -132,7 +113,7 @@ class Programa extends Model
     public function scopeActivos($query)
     {
         return $query->whereHas('institucion', function($q) {
-            $q->where('estado', 1);
+            $q->where('estado', 'activo');
         });
     }
 
@@ -149,7 +130,7 @@ class Programa extends Model
      */
     public function scopePorTipo($query, int $tipoId)
     {
-        return $query->where('Tipo_programa_id', $tipoId);
+        return $query->where('tipo_programa_id', $tipoId);
     }
 
     /**
@@ -157,7 +138,15 @@ class Programa extends Model
      */
     public function scopePorRama($query, int $ramaId)
     {
-        return $query->where('Rama_academica_id', $ramaId);
+        return $query->where('rama_academica_id', $ramaId);
+    }
+
+    /**
+     * Scope para programas por institución
+     */
+    public function scopePorInstitucion($query, int $institucionId)
+    {
+        return $query->where('institucion_id', $institucionId);
     }
 
     /**
