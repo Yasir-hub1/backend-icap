@@ -17,6 +17,7 @@ class Estudiante extends Persona implements AuthenticatableContract, JWTSubject
     protected $primaryKey = 'registro_estudiante';
 
     protected $fillable = [
+        'persona_id',
         'ci',
         'nombre',
         'apellido',
@@ -43,6 +44,22 @@ class Estudiante extends Persona implements AuthenticatableContract, JWTSubject
     public function inscripciones(): HasMany
     {
         return $this->hasMany(Inscripcion::class, 'registro_estudiante', 'registro_estudiante');
+    }
+
+    /**
+     * Relación con usuario a través de persona
+     */
+    public function usuario(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Usuario::class, 'persona_id', 'persona_id');
+    }
+
+    /**
+     * Relación con persona (self-reference para herencia)
+     */
+    public function persona(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Persona::class, 'persona_id', 'persona_id');
     }
 
     /**

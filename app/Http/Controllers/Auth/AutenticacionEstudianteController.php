@@ -42,8 +42,21 @@ class AutenticacionEstudianteController extends Controller
         }
 
         try {
-            // Create student
+            // Primero crear la Persona
+            $persona = \App\Models\Persona::create([
+                'ci' => $request->ci,
+                'nombre' => $request->nombre,
+                'apellido' => $request->apellido,
+                'celular' => $request->celular,
+                'fecha_nacimiento' => $request->fecha_nacimiento,
+                'direccion' => $request->direccion
+            ]);
+
+            \Log::info('Persona creada', ['persona_id' => $persona->persona_id]);
+
+            // Luego crear Estudiante referenciando a Persona
             $estudiante = Estudiante::create([
+                'persona_id' => $persona->persona_id,
                 'ci' => $request->ci,
                 'nombre' => $request->nombre,
                 'apellido' => $request->apellido,
@@ -53,11 +66,20 @@ class AutenticacionEstudianteController extends Controller
                 'provincia' => $request->provincia
             ]);
 
-            // Create usuario with password
+            \Log::info('Estudiante creado', [
+                'registro_estudiante' => $estudiante->registro_estudiante,
+                'persona_id' => $estudiante->persona_id
+            ]);
+
+            // Create usuario with password usando persona_id de la persona
             $usuario = \App\Models\Usuario::create([
                 'email' => $request->ci . '@estudiante.com', // Usar CI como email temporal
                 'password' => Hash::make($request->password),
-                'persona_id' => $estudiante->persona_id
+                'persona_id' => $persona->persona_id
+            ]);
+
+            \Log::info('Usuario creado', [
+                'usuario_id' => $usuario->usuario_id
             ]);
 
             // Log to Bitacora
@@ -120,9 +142,33 @@ class AutenticacionEstudianteController extends Controller
         }
 
         try {
+            // Buscar estudiante por CI
             $estudiante = Estudiante::where('ci', $request->ci)->first();
 
-            if (!$estudiante || !Hash::check($request->password, $estudiante->password)) {
+            \Log::info('Login attempt', [
+                'ci' => $request->ci,
+                'estudiante_found' => $estudiante ? true : false,
+                'estudiante_id' => $estudiante ? $estudiante->registro_estudiante : null,
+                'persona_id' => $estudiante ? $estudiante->persona_id : null
+            ]);
+
+            if (!$estudiante) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'CI o contraseña incorrectos'
+                ], 401);
+            }
+
+            // Buscar el usuario asociado a la persona del estudiante
+            $usuario = $estudiante->usuario;
+
+            \Log::info('Usuario found', [
+                'usuario_found' => $usuario ? true : false,
+                'usuario_id' => $usuario ? $usuario->usuario_id : null,
+                'has_password' => $usuario ? !empty($usuario->password) : false
+            ]);
+
+            if (!$usuario || !Hash::check($request->password, $usuario->password)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'CI o contraseña incorrectos'
@@ -134,10 +180,11 @@ class AutenticacionEstudianteController extends Controller
 
             // Log to Bitacora
             Bitacora::create([
+                'fecha_hora' => now(),
                 'tabla' => 'Estudiante',
-                'codTable' => json_encode(['estudiante_id' => $estudiante->id]),
+                'cod_tabla' => $estudiante->registro_estudiante,
                 'transaccion' => 'LOGIN_ESTUDIANTE',
-                'Usuario_id' => $estudiante->id
+                'usuario_id' => $usuario->usuario_id
             ]);
 
             return response()->json([
