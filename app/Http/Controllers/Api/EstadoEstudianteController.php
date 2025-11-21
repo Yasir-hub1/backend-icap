@@ -49,7 +49,7 @@ class EstadoEstudianteController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'nombre_estado' => 'required|string|max:50|unique:Estado_estudiante,nombre_estado'
+            'nombre_estado' => 'required|string|max:50|unique:estado_estudiante,nombre_estado'
         ]);
 
         $estado = EstadoEstudiante::create($request->validated());
@@ -71,7 +71,7 @@ class EstadoEstudianteController extends Controller
         $estado = EstadoEstudiante::findOrFail($id);
 
         $request->validate([
-            'nombre_estado' => 'required|string|max:50|unique:Estado_estudiante,nombre_estado,' . $id
+            'nombre_estado' => 'required|string|max:50|unique:estado_estudiante,nombre_estado,' . $id
         ]);
 
         $estado->update($request->validated());

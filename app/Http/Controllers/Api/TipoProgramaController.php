@@ -49,7 +49,7 @@ class TipoProgramaController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'nombre' => 'required|string|max:100|unique:Tipo_programa,nombre'
+            'nombre' => 'required|string|max:100|unique:tipo_programa,nombre'
         ]);
 
         $tipo = TipoPrograma::create($request->validated());
@@ -71,7 +71,7 @@ class TipoProgramaController extends Controller
         $tipo = TipoPrograma::findOrFail($id);
 
         $request->validate([
-            'nombre' => 'required|string|max:100|unique:Tipo_programa,nombre,' . $id
+            'nombre' => 'required|string|max:100|unique:tipo_programa,nombre,' . $id
         ]);
 
         $tipo->update($request->validated());

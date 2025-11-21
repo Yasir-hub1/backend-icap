@@ -24,13 +24,13 @@ class ProgramaRequest extends FormRequest
             'duracion_meses' => 'required|integer|min:1|max:120',
             'total_modulos' => 'nullable|integer|min:0|max:50',
             'costo' => 'required|numeric|min:0|max:999999.99',
-            'Rama_academica_id' => 'nullable|exists:Rama_academica,id',
-            'Tipo_programa_id' => 'required|exists:Tipo_programa,id',
-            'Programa_id' => 'nullable|exists:Programa,id',
-            'Institucion_id' => 'required|exists:Institucion,id',
-            'version_id' => 'nullable|exists:Version,id',
+            'Rama_academica_id' => 'nullable|exists:rama_academica,id',
+            'Tipo_programa_id' => 'required|exists:tipo_programa,id',
+            'Programa_id' => 'nullable|exists:programa,id',
+            'Institucion_id' => 'required|exists:institucion,id',
+            'version_id' => 'nullable|exists:version,id',
             'modulos' => 'nullable|array',
-            'modulos.*' => 'exists:Modulo,id'
+            'modulos.*' => 'exists:modulo,id'
         ];
     }
 

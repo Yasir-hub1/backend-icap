@@ -11,13 +11,21 @@ use Illuminate\Support\Facades\DB;
 class NotaController extends Controller
 {
     /**
+     * Registrar o actualizar nota de un estudiante (alias para crear)
+     */
+    public function crear(Request $request)
+    {
+        return $this->store($request);
+    }
+
+    /**
      * Registrar o actualizar nota de un estudiante
      */
     public function store(Request $request)
     {
         $request->validate([
-            'grupo_id' => 'required|exists:Grupo,id',
-            'estudiante_id' => 'required|exists:Estudiante,id',
+            'grupo_id' => 'required|exists:grupo,id',
+            'estudiante_id' => 'required|exists:estudiante,id',
             'nota' => 'required|numeric|min:0|max:100'
         ]);
 
@@ -88,14 +96,22 @@ class NotaController extends Controller
     }
 
     /**
+     * Registrar notas masivas para un grupo (alias para crearMasivo)
+     */
+    public function crearMasivo(Request $request)
+    {
+        return $this->storeBulk($request);
+    }
+
+    /**
      * Registrar notas masivas para un grupo
      */
     public function storeBulk(Request $request)
     {
         $request->validate([
-            'grupo_id' => 'required|exists:Grupo,id',
+            'grupo_id' => 'required|exists:grupo,id',
             'notas' => 'required|array',
-            'notas.*.estudiante_id' => 'required|exists:Estudiante,id',
+            'notas.*.estudiante_id' => 'required|exists:estudiante,id',
             'notas.*.nota' => 'required|numeric|min:0|max:100'
         ]);
 
@@ -166,6 +182,14 @@ class NotaController extends Controller
     }
 
     /**
+     * Obtener estadísticas de notas de un grupo (alias para obtenerEstadisticasGrupo)
+     */
+    public function obtenerEstadisticasGrupo(Request $request, $grupoId)
+    {
+        return $this->getGroupStatistics($request, $grupoId);
+    }
+
+    /**
      * Obtener estadísticas de notas de un grupo
      */
     public function getGroupStatistics(Request $request, $grupoId)
@@ -195,7 +219,7 @@ class NotaController extends Controller
                 'promedio' => $notas->count() > 0 ? round($notas->avg(), 2) : 0,
                 'nota_maxima' => $notas->count() > 0 ? $notas->max() : 0,
                 'nota_minima' => $notas->count() > 0 ? $notas->min() : 0,
-                'porcentaje_aprobacion' => $conNotas->count() > 0 
+                'porcentaje_aprobacion' => $conNotas->count() > 0
                     ? round(($conNotas->filter(fn($e) => $e->pivot->nota >= 51)->count() / $conNotas->count()) * 100, 2)
                     : 0
             ];

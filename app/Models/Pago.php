@@ -9,13 +9,18 @@ class Pago extends Model
 {
     protected $table = 'pagos';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'fecha',
         'monto',
-        'saldo',
-        'cuota_id'
+        'token',
+        'cuota_id',
+        'verificado',
+        'fecha_verificacion',
+        'verificado_por',
+        'observaciones',
+        'metodo'
     ];
 
     protected $casts = [
@@ -23,7 +28,9 @@ class Pago extends Model
         'cuota_id' => 'integer',
         'fecha' => 'date',
         'monto' => 'decimal:2',
-        'saldo' => 'decimal:2'
+        'verificado' => 'boolean',
+        'fecha_verificacion' => 'datetime',
+        'verificado_por' => 'integer'
     ];
 
     /**
@@ -32,6 +39,14 @@ class Pago extends Model
     public function cuota(): BelongsTo
     {
         return $this->belongsTo(Cuota::class, 'cuota_id', 'id');
+    }
+
+    /**
+     * Relación con usuario que verificó el pago
+     */
+    public function verificador(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'verificado_por', 'usuario_id');
     }
 
     /**
@@ -59,19 +74,11 @@ class Pago extends Model
     }
 
     /**
-     * Accessor para verificar si es pago completo
-     */
-    public function getEsPagoCompletoAttribute(): bool
-    {
-        return $this->saldo <= 0;
-    }
-
-    /**
      * Accessor para obtener porcentaje pagado
      */
     public function getPorcentajePagadoAttribute(): float
     {
         $cuota = $this->cuota;
-        return $cuota ? ($this->monto / $cuota->monto) * 100 : 0;
+        return $cuota && $cuota->monto > 0 ? ($this->monto / $cuota->monto) * 100 : 0;
     }
 }

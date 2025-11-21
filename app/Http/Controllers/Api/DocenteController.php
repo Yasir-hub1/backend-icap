@@ -91,14 +91,14 @@ class DocenteController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'ci' => 'required|string|max:20|unique:Docente,ci',
+            'ci' => 'required|string|max:20|unique:docente,ci',
             'nombre' => 'required|string|max:100',
             'apellido' => 'required|string|max:100',
             'celular' => 'nullable|string|max:20',
             'fecha_nacimiento' => 'nullable|date',
             'direccion' => 'nullable|string|max:300',
             'fotografia' => 'nullable|string',
-            'registro_docente' => 'required|string|max:50|unique:Docente,registro_docente',
+            'registro_docente' => 'required|string|max:50|unique:docente,registro_docente',
             'cargo' => 'nullable|string|max:100',
             'area_de_especializacion' => 'nullable|string|max:200',
             'modalidad_de_contratacion' => 'nullable|string|max:100'
@@ -136,14 +136,14 @@ class DocenteController extends Controller
         $docente = Docente::findOrFail($id);
 
         $request->validate([
-            'ci' => 'required|string|max:20|unique:Docente,ci,' . $id,
+            'ci' => 'required|string|max:20|unique:docente,ci,' . $id,
             'nombre' => 'required|string|max:100',
             'apellido' => 'required|string|max:100',
             'celular' => 'nullable|string|max:20',
             'fecha_nacimiento' => 'nullable|date',
             'direccion' => 'nullable|string|max:300',
             'fotografia' => 'nullable|string',
-            'registro_docente' => 'required|string|max:50|unique:Docente,registro_docente,' . $id,
+            'registro_docente' => 'required|string|max:50|unique:docente,registro_docente,' . $id,
             'cargo' => 'nullable|string|max:100',
             'area_de_especializacion' => 'nullable|string|max:200',
             'modalidad_de_contratacion' => 'nullable|string|max:100'

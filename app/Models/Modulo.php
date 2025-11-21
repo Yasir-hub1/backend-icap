@@ -9,7 +9,7 @@ class Modulo extends Model
 {
     protected $table = 'modulo';
     protected $primaryKey = 'modulo_id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre',
@@ -24,12 +24,25 @@ class Modulo extends Model
     ];
 
     /**
+     * Atributos adicionales que se deben agregar a la serialización
+     */
+    protected $appends = ['id'];
+
+    /**
+     * Accessor para compatibilidad: devolver modulo_id como id también
+     */
+    public function getIdAttribute()
+    {
+        return $this->attributes['modulo_id'] ?? null;
+    }
+
+    /**
      * Relación con programas (many-to-many)
      */
     public function programas(): BelongsToMany
     {
-        return $this->belongsToMany(Programa::class, 'Programa_modulo', 'modulo_id', 'programa_id', 'modulo_id', 'id')
-                    ->withPivot('estado');
+        return $this->belongsToMany(Programa::class, 'programa_modulo', 'modulo_id', 'programa_id', 'modulo_id', 'id')
+                    ->withPivot('edicion');
     }
 
     /**

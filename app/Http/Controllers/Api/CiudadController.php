@@ -63,7 +63,7 @@ class CiudadController extends Controller
         $request->validate([
             'nombre_ciudad' => 'required|string|max:100',
             'codigo_postal' => 'nullable|string|max:20',
-            'Provincia_id' => 'required|exists:Provincia,id'
+            'Provincia_id' => 'required|exists:provincia,id'
         ]);
 
         $ciudad = Ciudad::create($request->validated());
@@ -85,7 +85,7 @@ class CiudadController extends Controller
         $request->validate([
             'nombre_ciudad' => 'required|string|max:100',
             'codigo_postal' => 'nullable|string|max:20',
-            'Provincia_id' => 'required|exists:Provincia,id'
+            'Provincia_id' => 'required|exists:provincia,id'
         ]);
 
         $ciudad->update($request->validated());

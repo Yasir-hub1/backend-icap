@@ -14,29 +14,32 @@ class Estudiante extends Persona implements AuthenticatableContract, JWTSubject
 {
     use Authenticatable;
     protected $table = 'estudiante';
-    protected $primaryKey = 'registro_estudiante';
-    public $timestamps = false;
+    protected $primaryKey = 'id';
+    public $timestamps = true;
 
     protected $fillable = [
-        'persona_id',
+        // Campos heredados de Persona
+        'id',
         'ci',
         'nombre',
         'apellido',
         'celular',
+        'sexo',
         'fecha_nacimiento',
         'direccion',
         'fotografia',
-        'email',
-        'telefono_fijo',
-        'genero',
-        'estado_civil',
-        'nacionalidad',
-        'lugar_nacimiento',
-        'provincia'
+        'usuario_id',
+        // Campos propios de Estudiante
+        'registro_estudiante',
+        'provincia',
+        'estado_id'
     ];
 
     protected $casts = [
-        'registro_estudiante' => 'integer'
+        'id' => 'integer',
+        'estado_id' => 'integer',
+        'usuario_id' => 'integer',
+        'fecha_nacimiento' => 'date'
     ];
 
     /**
@@ -44,23 +47,21 @@ class Estudiante extends Persona implements AuthenticatableContract, JWTSubject
      */
     public function inscripciones(): HasMany
     {
-        return $this->hasMany(Inscripcion::class, 'registro_estudiante', 'registro_estudiante');
+        return $this->hasMany(Inscripcion::class, 'estudiante_id', 'id');
     }
 
     /**
-     * Relación con usuario a través de persona
+     * Relación con usuario (heredada de Persona)
+     * No sobrescribir - usar la relación HasOne de Persona que es la correcta
+     * La relación es: Persona -> HasOne -> Usuario (Usuario tiene persona_id)
      */
-    public function usuario(): \Illuminate\Database\Eloquent\Relations\HasOne
-    {
-        return $this->hasOne(Usuario::class, 'persona_id', 'persona_id');
-    }
 
     /**
-     * Relación con persona (self-reference para herencia)
+     * Relación con estado del estudiante
      */
-    public function persona(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    public function estadoEstudiante(): BelongsTo
     {
-        return $this->belongsTo(Persona::class, 'persona_id', 'persona_id');
+        return $this->belongsTo(EstadoEstudiante::class, 'estado_id', 'id');
     }
 
     /**
@@ -70,11 +71,21 @@ class Estudiante extends Persona implements AuthenticatableContract, JWTSubject
 
     /**
      * Relación con grupos (many-to-many)
+     * La tabla grupo_estudiante usa estudiante_id y grupo_id
+     * El modelo Grupo usa grupo_id como primary key (no id)
      */
     public function grupos(): BelongsToMany
     {
-        return $this->belongsToMany(Grupo::class, 'grupo_estudiante', 'registro_estudiante', 'grupo_id', 'registro_estudiante', 'grupo_id')
+        return $this->belongsToMany(Grupo::class, 'grupo_estudiante', 'estudiante_id', 'grupo_id', 'id', 'grupo_id')
                     ->withPivot(['nota', 'estado']);
+    }
+
+    /**
+     * Relación con estado (alias para estadoEstudiante)
+     */
+    public function estado(): BelongsTo
+    {
+        return $this->estadoEstudiante();
     }
 
     /**

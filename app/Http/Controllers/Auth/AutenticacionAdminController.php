@@ -3,159 +3,150 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use App\Models\Docente;
-use App\Models\Bitacora;
+use App\Models\Usuario;
+use App\Models\Persona;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AutenticacionAdminController extends Controller
 {
     /**
-     * Admin/Teacher login
+     * Iniciar sesión para administradores
      */
-    public function login(Request $request)
+    public function iniciarSesion(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'ci' => 'required|string',
-            'password' => 'required|string'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
         try {
-            // Search by CI or registro_docente
-            $docente = Docente::where('ci', $request->ci)
-                             ->orWhere('registro_docente', $request->ci)
-                             ->first();
+            Log::info('🔐 Admin Login attempt', $request->only('email', 'ci'));
 
-            if (!$docente || !Hash::check($request->password, $docente->clave)) {
+            // Validar que venga email o ci
+            $validator = Validator::make($request->all(), [
+                'password' => 'required|string|min:6'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Datos de validación incorrectos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Buscar usuario por email o CI
+            $usuario = null;
+            if ($request->has('email')) {
+                $usuario = Usuario::where('email', $request->email)->first();
+            } elseif ($request->has('ci')) {
+                // Buscar por persona con ese CI
+                $persona = Persona::where('ci', $request->ci)->first();
+                if ($persona) {
+                    $usuario = Usuario::where('persona_id', $persona->persona_id)->first();
+                }
+            }
+
+            if (!$usuario) {
+                Log::warning('🔐 Usuario no encontrado', ['email' => $request->email, 'ci' => $request->ci]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Credenciales incorrectas'
                 ], 401);
             }
 
-            // Generate JWT token
-            $token = JWTAuth::fromUser($docente);
+            // Verificar password
+            if (!Hash::check($request->password, $usuario->password)) {
+                Log::warning('🔐 Password incorrecto', ['usuario_id' => $usuario->usuario_id]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Credenciales incorrectas'
+                ], 401);
+            }
 
-            // Determine role
-            $rol = $docente->rol ?? 'DOCENTE';
+            // Cargar relación con rol y permisos ANTES de generar el token
+            $usuario->load('rol.permisos', 'persona');
 
-            // Log to Bitacora
-            Bitacora::create([
-                'tabla' => 'Docente',
-                'codTable' => json_encode(['docente_id' => $docente->id, 'rol' => $rol]),
-                'transaccion' => $rol === 'ADMIN' ? 'LOGIN_ADMIN' : 'LOGIN_DOCENTE',
-                'Usuario_id' => $docente->id
+            // Verificar que tenga rol ADMIN o DOCENTE
+            $rolNombre = $usuario->rol ? $usuario->rol->nombre_rol : null;
+            if (!in_array($rolNombre, ['ADMIN', 'DOCENTE'])) {
+                Log::warning('🔐 Rol no autorizado', ['rol' => $rolNombre]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Acceso denegado. Solo administradores y docentes pueden acceder.'
+                ], 403);
+            }
+
+            // Generar token JWT con custom claims explícitos para asegurar que el rol esté incluido
+            // Esto es necesario porque el modelo puede no tener el rol cargado cuando se llama getJWTCustomClaims()
+            $customClaims = [
+                'rol' => $rolNombre,
+                'rol_id' => $usuario->rol_id,
+                'usuario_id' => $usuario->usuario_id,
+                'persona_id' => $usuario->persona_id,
+                'email' => $usuario->email
+            ];
+            $token = JWTAuth::customClaims($customClaims)->fromUser($usuario);
+
+            // Verificar que el token incluye el rol
+            $finalPayload = JWTAuth::setToken($token)->getPayload();
+            $tokenRol = $finalPayload->get('rol');
+
+            if (!$tokenRol) {
+                Log::error('🔐 ERROR CRÍTICO: Token generado sin rol', [
+                    'usuario_id' => $usuario->usuario_id,
+                    'rol_id' => $usuario->rol_id,
+                    'rol_nombre' => $rolNombre,
+                    'payload' => $finalPayload->toArray()
+                ]);
+            }
+
+            Log::info('✅ Login exitoso', [
+                'usuario_id' => $usuario->usuario_id,
+                'rol' => $rolNombre,
+                'rol_id' => $usuario->rol_id,
+                'rol_en_token' => $tokenRol,
+                'token_valid' => !empty($tokenRol)
             ]);
 
+            // Cargar permisos del rol
+            $permisos = [];
+            if ($usuario->rol) {
+                $permisos = $usuario->rol->permisos->map(function($permiso) {
+                    return [
+                        'id' => $permiso->permiso_id,
+                        'nombre_permiso' => $permiso->nombre_permiso,
+                        'modulo' => $permiso->modulo,
+                        'accion' => $permiso->accion,
+                        'descripcion' => $permiso->descripcion
+                    ];
+                })->toArray();
+            }
+
             return response()->json([
                 'success' => true,
+                'message' => 'Login exitoso',
                 'token' => $token,
                 'token_type' => 'bearer',
-                'expires_in' => auth()->factory()->getTTL() * 60,
+                'expires_in' => JWTAuth::factory()->getTTL() * 60,
                 'user' => [
-                    'id' => $docente->id,
-                    'ci' => $docente->ci,
-                    'nombre' => $docente->nombre,
-                    'apellido' => $docente->apellido,
-                    'registro_docente' => $docente->registro_docente,
-                    'cargo' => $docente->cargo,
-                    'area_especializacion' => $docente->area_de_especializacion,
-                    'rol' => $rol
+                    'id' => $usuario->usuario_id,
+                    'email' => $usuario->email,
+                    'nombre' => $usuario->persona->nombre ?? 'Admin',
+                    'apellido' => $usuario->persona->apellido ?? 'Sistema',
+                    'ci' => $usuario->persona->ci ?? null,
+                    'rol' => $rolNombre,
+                    'rol_id' => $usuario->rol_id,
+                    'permisos' => $permisos
                 ]
-            ], 200);
+            ]);
 
         } catch (\Exception $e) {
+            Log::error('Error en login admin: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
             return response()->json([
                 'success' => false,
-                'message' => 'Error al iniciar sesión',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Get authenticated user
-     */
-    public function me()
-    {
-        try {
-            $user = auth()->user();
-
-            $rol = $user->rol ?? 'DOCENTE';
-
-            return response()->json([
-                'success' => true,
-                'user' => [
-                    'id' => $user->id,
-                    'ci' => $user->ci,
-                    'nombre' => $user->nombre,
-                    'apellido' => $user->apellido,
-                    'celular' => $user->celular,
-                    'registro_docente' => $user->registro_docente,
-                    'cargo' => $user->cargo,
-                    'area_especializacion' => $user->area_de_especializacion,
-                    'modalidad_contratacion' => $user->modalidad_de_contratacion,
-                    'rol' => $rol
-                ]
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al obtener usuario',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Logout
-     */
-    public function logout()
-    {
-        try {
-            auth()->logout();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Sesión cerrada exitosamente'
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al cerrar sesión',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Refresh token
-     */
-    public function refresh()
-    {
-        try {
-            $newToken = auth()->refresh();
-
-            return response()->json([
-                'success' => true,
-                'token' => $newToken,
-                'token_type' => 'bearer',
-                'expires_in' => auth()->factory()->getTTL() * 60
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al refrescar token',
-                'error' => $e->getMessage()
+                'message' => 'Error interno del servidor',
+                'error' => config('app.debug') ? $e->getMessage() : 'Error de autenticación'
             ], 500);
         }
     }

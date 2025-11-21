@@ -3,29 +3,32 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Descuento extends Model
 {
     protected $table = 'descuento';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre',
-        'descuento'
+        'descuento',
+        'inscripcion_id'
     ];
 
     protected $casts = [
+        'id' => 'integer',
+        'inscripcion_id' => 'integer',
         'descuento' => 'decimal:2'
     ];
 
     /**
-     * Relación con inscripciones
+     * Relación con inscripción (uno a uno)
      */
-    public function inscripciones(): HasMany
+    public function inscripcion(): BelongsTo
     {
-        return $this->hasMany(Inscripcion::class, 'descuento_id', 'id');
+        return $this->belongsTo(Inscripcion::class, 'inscripcion_id', 'id');
     }
 
     /**

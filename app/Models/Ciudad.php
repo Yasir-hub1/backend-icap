@@ -10,7 +10,7 @@ class Ciudad extends Model
 {
     protected $table = 'ciudad';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre_ciudad',

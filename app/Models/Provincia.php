@@ -10,7 +10,7 @@ class Provincia extends Model
 {
     protected $table = 'provincia';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre_provincia',
@@ -50,6 +50,14 @@ class Provincia extends Model
      * Scope para buscar por país
      */
     public function scopePorPais($query, int $paisId)
+    {
+        return $query->where('pais_id', $paisId);
+    }
+
+    /**
+     * Scope para provincias de un país (alias para compatibilidad)
+     */
+    public function scopeDelPais($query, int $paisId)
     {
         return $query->where('pais_id', $paisId);
     }

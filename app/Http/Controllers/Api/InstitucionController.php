@@ -122,7 +122,7 @@ class InstitucionController extends Controller
             'sitio_web' => 'nullable|url|max:200',
             'fecha_fundacion' => 'nullable|date',
             'estado' => 'required|integer|in:0,1',
-            'ciudad_id' => 'required|exists:Ciudad,id'
+            'ciudad_id' => 'required|exists:ciudad,id'
         ]);
 
         DB::beginTransaction();
@@ -164,7 +164,7 @@ class InstitucionController extends Controller
             'sitio_web' => 'nullable|url|max:200',
             'fecha_fundacion' => 'nullable|date',
             'estado' => 'required|integer|in:0,1',
-            'ciudad_id' => 'required|exists:Ciudad,id'
+            'ciudad_id' => 'required|exists:ciudad,id'
         ]);
 
         $institucion->update($request->validated());

@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Cuota;
 use App\Models\Pago;
 use App\Models\Bitacora;
+use App\Models\Inscripcion;
+use App\Models\Estudiante;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -14,6 +16,14 @@ use Illuminate\Support\Str;
 class PagoController extends Controller
 {
     /**
+     * Listado de cuotas del estudiante (pendientes y pagadas) - alias para listar
+     */
+    public function listar(Request $request)
+    {
+        return $this->index($request);
+    }
+
+    /**
      * Listado de cuotas del estudiante (pendientes y pagadas)
      */
     public function index(Request $request)
@@ -21,54 +31,102 @@ class PagoController extends Controller
         try {
             $estudiante = $request->auth_user;
 
-            // Obtener todas las cuotas del estudiante a través de inscripciones
-            $cuotas = Cuota::whereHas('planPagos.inscripcion', function ($query) use ($estudiante) {
-                    $query->where('Estudiante_id', $estudiante->id);
-                })
+            // Obtener el registro_estudiante correctamente
+            $registroEstudiante = $estudiante instanceof \App\Models\Estudiante
+                ? $estudiante->registro_estudiante
+                : $estudiante->id;
+
+            // Obtener planes de pago del estudiante agrupados por inscripción
+            $estudiante = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudiante) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+            $inscripciones = Inscripcion::where('estudiante_id', $estudiante->id)
                 ->with([
-                    'planPagos.inscripcion.programa',
-                    'pagos' => function ($query) {
-                        $query->orderBy('fecha', 'desc');
+                    'programa',
+                    'planPago.cuotas' => function ($query) {
+                        $query->with('pagos')->orderBy('fecha_ini', 'asc');
                     }
                 ])
-                ->orderBy('fecha_ini', 'asc')
-                ->get()
-                ->map(function ($cuota) {
+                ->get();
+
+            // Transformar datos para mostrar planes completos
+            $planesData = $inscripciones->map(function ($inscripcion) {
+                $plan = $inscripcion->planPago;
+                if (!$plan) {
+                    return null;
+                }
+
+                $cuotas = $plan->cuotas;
+                $totalCuotas = $cuotas->count();
+                $cuotasPagadas = $cuotas->filter(function ($cuota) {
+                    return $cuota->monto_pagado >= $cuota->monto;
+                })->count();
+
+                return [
+                    'inscripcion_id' => $inscripcion->id,
+                    'programa' => $inscripcion->programa ? $inscripcion->programa->nombre : '',
+                    'plan_id' => $plan->id,
+                    'monto_total' => $plan->monto_total,
+                    'monto_pagado' => $plan->monto_pagado,
+                    'monto_pendiente' => $plan->monto_pendiente,
+                    'esta_completo' => $plan->esta_completo,
+                    'total_cuotas' => $totalCuotas,
+                    'cuotas_pagadas' => $cuotasPagadas,
+                    'cuotas_pendientes' => $totalCuotas - $cuotasPagadas,
+                    'porcentaje_pagado' => $plan->monto_total > 0 ? ($plan->monto_pagado / $plan->monto_total) * 100 : 0,
+                    'cuotas' => $cuotas->map(function ($cuota) {
+                        return [
+                            'id' => $cuota->id,
+                            'monto' => $cuota->monto,
+                            'fecha_ini' => $cuota->fecha_ini,
+                            'fecha_fin' => $cuota->fecha_fin,
+                            'estado' => $cuota->monto_pagado >= $cuota->monto ? 'PAGADA' : ($cuota->esta_vencida ? 'VENCIDA' : 'PENDIENTE'),
+                            'esta_pagada' => $cuota->monto_pagado >= $cuota->monto,
+                            'esta_vencida' => $cuota->esta_vencida,
+                            'esta_pendiente' => $cuota->monto_pagado < $cuota->monto && !$cuota->esta_vencida,
+                            'monto_pagado' => $cuota->monto_pagado,
+                            'saldo_pendiente' => $cuota->saldo_pendiente,
+                            'pagos' => $cuota->pagos->map(function ($pago) {
+                                return [
+                                    'id' => $pago->id,
+                                    'fecha' => $pago->fecha,
+                                    'monto' => $pago->monto,
+                                    'token' => $pago->token
+                                ];
+                            })
+                        ];
+                    })
+                ];
+            })->filter()->values();
+
+            // Aplanar cuotas para compatibilidad con el frontend existente
+            $cuotas = $planesData->flatMap(function ($plan) {
+                return $plan['cuotas']->map(function ($cuota) use ($plan) {
                     return [
-                        'id' => $cuota->id,
-                        'programa' => $cuota->planPagos->inscripcion->programa->nombre,
-                        'monto' => $cuota->monto,
-                        'fecha_ini' => $cuota->fecha_ini,
-                        'fecha_fin' => $cuota->fecha_fin,
-                        'estado' => $cuota->esta_pagada ? 'PAGADA' : ($cuota->esta_vencida ? 'VENCIDA' : 'PENDIENTE'),
-                        'esta_pagada' => $cuota->esta_pagada,
-                        'esta_vencida' => $cuota->esta_vencida,
-                        'esta_pendiente' => $cuota->esta_pendiente,
-                        'monto_pagado' => $cuota->monto_pagado,
-                        'saldo_pendiente' => $cuota->saldo_pendiente,
-                        'pagos' => $cuota->pagos->map(function ($pago) {
-                            return [
-                                'id' => $pago->id,
-                                'fecha' => $pago->fecha,
-                                'monto' => $pago->monto,
-                                'metodo' => $pago->metodo,
-                                'verificado' => $pago->verificado,
-                                'fecha_verificacion' => $pago->fecha_verificacion,
-                                'observaciones' => $pago->observaciones
-                            ];
-                        })
+                        ...$cuota,
+                        'programa' => $plan['programa'],
+                        'plan_id' => $plan['plan_id'],
+                        'inscripcion_id' => $plan['inscripcion_id']
                     ];
                 });
+            });
 
             return response()->json([
                 'success' => true,
                 'message' => 'Cuotas obtenidas exitosamente',
                 'data' => [
-                    'cuotas' => $cuotas,
+                    'planes' => $planesData,
+                    'cuotas' => $cuotas->values(),
                     'total_cuotas' => $cuotas->count(),
-                    'cuotas_pagadas' => $cuotas->where('esta_pagada', true)->count(),
-                    'cuotas_pendientes' => $cuotas->where('esta_pendiente', true)->count(),
-                    'cuotas_vencidas' => $cuotas->where('esta_vencida', true)->count()
+                    'cuotas_pagadas' => $cuotas->filter(function($c) { return $c['esta_pagada']; })->count(),
+                    'cuotas_pendientes' => $cuotas->filter(function($c) { return $c['esta_pendiente']; })->count(),
+                    'cuotas_vencidas' => $cuotas->filter(function($c) { return $c['esta_vencida']; })->count(),
+                    'planes_completos' => $planesData->filter(function($p) { return $p['esta_completo']; })->count(),
+                    'planes_pendientes' => $planesData->filter(function($p) { return !$p['esta_completo']; })->count()
                 ]
             ], 200);
 
@@ -82,6 +140,14 @@ class PagoController extends Controller
     }
 
     /**
+     * Detalle de una cuota específica - alias para obtener
+     */
+    public function obtener(Request $request, $cuotaId)
+    {
+        return $this->show($request, $cuotaId);
+    }
+
+    /**
      * Detalle de una cuota específica
      */
     public function show(Request $request, $cuotaId)
@@ -89,12 +155,24 @@ class PagoController extends Controller
         try {
             $estudiante = $request->auth_user;
 
-            $cuota = Cuota::whereHas('planPagos.inscripcion', function ($query) use ($estudiante) {
-                    $query->where('Estudiante_id', $estudiante->id);
+            // Obtener el registro_estudiante correctamente
+            $registroEstudiante = $estudiante instanceof \App\Models\Estudiante
+                ? $estudiante->registro_estudiante
+                : $estudiante->id;
+
+            $estudianteObj = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudianteObj) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+            $cuota = Cuota::whereHas('planPago.inscripcion', function ($query) use ($estudianteObj) {
+                    $query->where('estudiante_id', $estudianteObj->id);
                 })
                 ->with([
-                    'planPagos.inscripcion.programa',
-                    'pagos.verificador'
+                    'planPago.inscripcion.programa',
+                    'pagos'
                 ])
                 ->findOrFail($cuotaId);
 
@@ -104,7 +182,7 @@ class PagoController extends Controller
                 'data' => [
                     'cuota' => [
                         'id' => $cuota->id,
-                        'programa' => $cuota->planPagos->inscripcion->programa->nombre,
+                        'programa' => $cuota->planPago->inscripcion->programa->nombre ?? '',
                         'monto' => $cuota->monto,
                         'fecha_ini' => $cuota->fecha_ini,
                         'fecha_fin' => $cuota->fecha_fin,
@@ -117,12 +195,7 @@ class PagoController extends Controller
                             'id' => $pago->id,
                             'fecha' => $pago->fecha,
                             'monto' => $pago->monto,
-                            'metodo' => $pago->metodo,
-                            'verificado' => $pago->verificado,
-                            'fecha_verificacion' => $pago->fecha_verificacion,
-                            'verificado_por' => $pago->verificador ? $pago->verificador->nombre : null,
-                            'comprobante_url' => $pago->comprobante_path ? Storage::url($pago->comprobante_path) : null,
-                            'observaciones' => $pago->observaciones
+                            'token' => $pago->token
                         ];
                     })
                 ]
@@ -135,6 +208,14 @@ class PagoController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Registrar pago con comprobante (alias para crear)
+     */
+    public function crear(Request $request)
+    {
+        return $this->store($request);
     }
 
     /**
@@ -153,9 +234,21 @@ class PagoController extends Controller
         try {
             $estudiante = $request->auth_user;
 
+            // Obtener el registro_estudiante correctamente
+            $registroEstudiante = $estudiante instanceof \App\Models\Estudiante
+                ? $estudiante->registro_estudiante
+                : $estudiante->id;
+
             // Verificar que la cuota pertenezca al estudiante
-            $cuota = Cuota::whereHas('planPagos.inscripcion', function ($query) use ($estudiante) {
-                    $query->where('Estudiante_id', $estudiante->id);
+            $estudianteObj = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudianteObj) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+            $cuota = Cuota::whereHas('planPago.inscripcion', function ($query) use ($estudianteObj) {
+                    $query->where('estudiante_id', $estudianteObj->id);
                 })
                 ->findOrFail($request->cuota_id);
 
@@ -167,40 +260,45 @@ class PagoController extends Controller
                 ], 400);
             }
 
-            // Subir comprobante
-            $comprobante = $request->file('comprobante');
-            $filename = 'comprobante_' . $estudiante->registro_estudiante . '_' . time() . '.' . $comprobante->getClientOriginalExtension();
-            $comprobantePath = $comprobante->storeAs('comprobantes', $filename, 'public');
+            // Validar que el monto no exceda el saldo pendiente
+            if ($request->monto > $cuota->saldo_pendiente) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El monto excede el saldo pendiente de la cuota'
+                ], 422);
+            }
 
             // Crear registro de pago
             $pago = Pago::create([
-                'fecha' => now(),
+                'fecha' => now()->toDateString(),
                 'monto' => $request->monto,
-                'token' => Str::random(32),
-                'metodo' => $request->metodo,
-                'comprobante_path' => $comprobantePath,
-                'observaciones' => $request->observaciones ?? 'Pago registrado por estudiante',
-                'verificado' => false,
-                'cuotas_id' => $cuota->id
+                'token' => $request->token ?? Str::random(32),
+                'cuota_id' => $cuota->id
             ]);
 
+            // Verificar si todas las cuotas del plan están pagadas
+            $plan = $cuota->planPago;
+            $this->verificarEstadoPlan($plan);
+
             // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'pagos',
-                'codTable' => $pago->id,
-                'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) registró pago de {$request->monto} Bs por método {$request->metodo}. Pendiente de verificación.",
-                'Usuario_id' => $estudiante->id
-            ]);
+            $usuario = $estudiante->usuario;
+            if ($usuario) {
+                Bitacora::create([
+                    'fecha' => now()->toDateString(),
+                    'tabla' => 'Pagos',
+                    'codTabla' => $pago->id,
+                    'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) registró pago de {$request->monto} Bs. Token: " . ($request->token ?? $pago->token),
+                    'usuario_id' => $usuario->usuario_id
+                ]);
+            }
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Pago registrado exitosamente. Está pendiente de verificación por el administrador.',
+                'message' => 'Pago registrado exitosamente',
                 'data' => [
-                    'pago' => $pago,
-                    'comprobante_url' => Storage::url($comprobantePath)
+                    'pago' => $pago->load('cuota')
                 ]
             ], 201);
 
@@ -215,6 +313,14 @@ class PagoController extends Controller
     }
 
     /**
+     * Obtener información para generar QR de pago (alias para obtenerInfoQR)
+     */
+    public function obtenerInfoQR(Request $request, $cuotaId)
+    {
+        return $this->getQRInfo($request, $cuotaId);
+    }
+
+    /**
      * Obtener información para generar QR de pago
      */
     public function getQRInfo(Request $request, $cuotaId)
@@ -222,10 +328,22 @@ class PagoController extends Controller
         try {
             $estudiante = $request->auth_user;
 
-            $cuota = Cuota::whereHas('planPagos.inscripcion', function ($query) use ($estudiante) {
-                    $query->where('Estudiante_id', $estudiante->id);
+            // Obtener el registro_estudiante correctamente
+            $registroEstudiante = $estudiante instanceof \App\Models\Estudiante
+                ? $estudiante->registro_estudiante
+                : $estudiante->id;
+
+            $estudianteObj = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudianteObj) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+            $cuota = Cuota::whereHas('planPago.inscripcion', function ($query) use ($estudianteObj) {
+                    $query->where('estudiante_id', $estudianteObj->id);
                 })
-                ->with('planPagos.inscripcion.programa')
+                ->with('planPago.inscripcion.programa')
                 ->findOrFail($cuotaId);
 
             if ($cuota->esta_pagada) {
@@ -240,7 +358,7 @@ class PagoController extends Controller
                 'success' => true,
                 'data' => [
                     'monto' => $cuota->saldo_pendiente,
-                    'concepto' => "Cuota {$cuota->planPagos->inscripcion->programa->nombre}",
+                    'concepto' => "Cuota " . ($cuota->planPago->inscripcion->programa->nombre ?? ''),
                     'referencia' => "EST-{$estudiante->registro_estudiante}-C{$cuota->id}",
                     'estudiante' => $estudiante->nombre . ' ' . $estudiante->apellido,
                     'ci' => $estudiante->ci
@@ -253,6 +371,47 @@ class PagoController extends Controller
                 'message' => 'Error al obtener información de QR',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Verificar y actualizar estado del plan cuando todas las cuotas están pagadas
+     */
+    private function verificarEstadoPlan($plan)
+    {
+        if (!$plan) {
+            return;
+        }
+
+        $cuotas = $plan->cuotas;
+        $todasPagadas = true;
+
+        foreach ($cuotas as $cuota) {
+            // Verificar si la cuota está completamente pagada
+            if ($cuota->monto_pagado < $cuota->monto) {
+                $todasPagadas = false;
+                break;
+            }
+        }
+
+        // El estado se verifica automáticamente con el accessor esta_completo del modelo
+        // No necesitamos guardar un estado adicional, se calcula dinámicamente
+        // Pero podemos registrar en bitácora cuando el plan se completa
+        if ($todasPagadas) {
+            $inscripcion = $plan->inscripcion;
+            if ($inscripcion && $inscripcion->estudiante) {
+                $estudiante = $inscripcion->estudiante;
+                $usuario = $estudiante->usuario;
+                if ($usuario) {
+                    Bitacora::create([
+                        'fecha' => now()->toDateString(),
+                        'tabla' => 'Plan_pago',
+                        'codTabla' => $plan->id,
+                        'transaccion' => "Plan de pago completado para el estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}). Todas las cuotas han sido pagadas.",
+                        'usuario_id' => $usuario->usuario_id
+                    ]);
+                }
+            }
         }
     }
 }

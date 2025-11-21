@@ -8,6 +8,14 @@ use Illuminate\Http\Request;
 class CertificadoController extends Controller
 {
     /**
+     * Listado de certificados disponibles (programas aprobados) (alias para listar)
+     */
+    public function listar(Request $request)
+    {
+        return $this->index($request);
+    }
+
+    /**
      * Listado de certificados disponibles (programas aprobados)
      */
     public function index(Request $request)
@@ -57,6 +65,14 @@ class CertificadoController extends Controller
     }
 
     /**
+     * Generar y descargar certificado en PDF (alias para descargar)
+     */
+    public function descargar(Request $request, $grupoId)
+    {
+        return $this->download($request, $grupoId);
+    }
+
+    /**
      * Generar y descargar certificado en PDF
      */
     public function download(Request $request, $grupoId)
@@ -99,7 +115,7 @@ class CertificadoController extends Controller
 
             // TODO: Implementar generación de PDF usando DomPDF o similar
             // Por ahora retornamos los datos JSON que se usarían para generar el PDF
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Datos del certificado obtenidos exitosamente',
@@ -120,6 +136,14 @@ class CertificadoController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Previsualizar certificado (alias para vistaPrevia)
+     */
+    public function vistaPrevia(Request $request, $grupoId)
+    {
+        return $this->preview($request, $grupoId);
     }
 
     /**

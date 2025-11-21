@@ -18,7 +18,7 @@ class BitacoraController extends Controller
         $query = Bitacora::with(['usuario:id,ci,nombre,apellido']);
 
         if ($request->filled('usuario_id')) {
-            $query->where('Usuario_id', $request->get('usuario_id'));
+            $query->where('usuario_id', $request->get('usuario_id'));
         }
 
         if ($request->filled('tabla')) {
@@ -30,11 +30,11 @@ class BitacoraController extends Controller
         }
 
         if ($request->filled('fecha_desde')) {
-            $query->where('fecha_hora', '>=', $request->get('fecha_desde'));
+            $query->where('fecha', '>=', $request->get('fecha_desde'));
         }
 
         if ($request->filled('fecha_hasta')) {
-            $query->where('fecha_hora', '<=', $request->get('fecha_hasta'));
+            $query->where('fecha', '<=', $request->get('fecha_hasta'));
         }
 
         if ($request->filled('recientes')) {
@@ -42,7 +42,7 @@ class BitacoraController extends Controller
         }
 
         $perPage = $request->get('per_page', 50);
-        $bitacora = $query->orderBy('fecha_hora', 'desc')->paginate($perPage);
+        $bitacora = $query->orderBy('fecha', 'desc')->orderBy('created_at', 'desc')->paginate($perPage);
 
         return response()->json([
             'success' => true,
@@ -75,7 +75,7 @@ class BitacoraController extends Controller
             'tabla' => 'required|string|max:100',
             'codTable' => 'nullable|string',
             'transaccion' => 'required|string|max:200',
-            'Usuario_id' => 'required|exists:Usuario,id'
+            'Usuario_id' => 'required|exists:usuario,id'
         ]);
 
         $registro = Bitacora::create($request->validated());
@@ -95,11 +95,11 @@ class BitacoraController extends Controller
         $query = Bitacora::query();
 
         if ($request->filled('fecha_desde')) {
-            $query->where('fecha_hora', '>=', $request->get('fecha_desde'));
+            $query->where('fecha', '>=', $request->get('fecha_desde'));
         }
 
         if ($request->filled('fecha_hasta')) {
-            $query->where('fecha_hora', '<=', $request->get('fecha_hasta'));
+            $query->where('fecha', '<=', $request->get('fecha_hasta'));
         }
 
         $estadisticas = [
@@ -108,9 +108,9 @@ class BitacoraController extends Controller
                 ->groupBy('tabla')
                 ->orderBy('total', 'desc')
                 ->get(),
-            'por_usuario' => $query->select('Usuario_id', DB::raw('count(*) as total'))
+            'por_usuario' => $query->select('usuario_id', DB::raw('count(*) as total'))
                 ->with('usuario:id,ci,nombre,apellido')
-                ->groupBy('Usuario_id')
+                ->groupBy('usuario_id')
                 ->orderBy('total', 'desc')
                 ->limit(10)
                 ->get(),
@@ -119,8 +119,8 @@ class BitacoraController extends Controller
                 ->orderBy('total', 'desc')
                 ->limit(10)
                 ->get(),
-            'por_dia' => $query->select(DB::raw('DATE(fecha_hora) as fecha'), DB::raw('count(*) as total'))
-                ->groupBy(DB::raw('DATE(fecha_hora)'))
+            'por_dia' => $query->select(DB::raw('DATE(fecha) as fecha'), DB::raw('count(*) as total'))
+                ->groupBy(DB::raw('DATE(fecha)'))
                 ->orderBy('fecha', 'desc')
                 ->limit(30)
                 ->get()
@@ -145,7 +145,7 @@ class BitacoraController extends Controller
         $dias = $request->get('dias_antiguedad');
         $fechaLimite = now()->subDays($dias);
 
-        $eliminados = Bitacora::where('fecha_hora', '<', $fechaLimite)->delete();
+        $eliminados = Bitacora::where('fecha', '<', $fechaLimite->toDateString())->delete();
 
         return response()->json([
             'success' => true,

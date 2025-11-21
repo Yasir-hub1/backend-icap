@@ -8,21 +8,21 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PlanPagos extends Model
 {
-    protected $table = 'plan_pagos';
+    protected $table = 'plan_pago';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
+        'inscripcion_id',
         'monto_total',
-        'total_cuotas',
-        'inscripcion_id'
+        'total_cuotas'
     ];
 
     protected $casts = [
         'id' => 'integer',
+        'inscripcion_id' => 'integer',
         'monto_total' => 'decimal:2',
-        'total_cuotas' => 'integer',
-        'inscripcion_id' => 'integer'
+        'total_cuotas' => 'integer'
     ];
 
     /**
@@ -38,7 +38,7 @@ class PlanPagos extends Model
      */
     public function cuotas(): HasMany
     {
-        return $this->hasMany(Cuota::class, 'plan_pagos_id', 'id');
+        return $this->hasMany(Cuota::class, 'plan_pago_id', 'id');
     }
 
     /**

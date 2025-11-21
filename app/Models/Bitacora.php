@@ -9,20 +9,20 @@ class Bitacora extends Model
 {
     protected $table = 'bitacora';
     protected $primaryKey = 'bitacora_id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
-        'fecha_hora',
+        'fecha',
         'tabla',
-        'cod_tabla',
+        'codTabla',
         'transaccion',
         'usuario_id'
     ];
 
     protected $casts = [
-        'Bitacora_id' => 'integer',
+        'bitacora_id' => 'integer',
         'usuario_id' => 'integer',
-        'fecha_hora' => 'datetime'
+        'fecha' => 'date'
     ];
 
     /**
@@ -62,6 +62,6 @@ class Bitacora extends Model
      */
     public function scopeRecientes($query, int $dias = 30)
     {
-        return $query->where('fecha_hora', '>=', now()->subDays($dias));
+        return $query->where('fecha', '>=', now()->subDays($dias));
     }
 }

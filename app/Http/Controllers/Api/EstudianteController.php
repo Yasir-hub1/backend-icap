@@ -99,14 +99,14 @@ class EstudianteController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'ci' => 'required|string|max:20|unique:Estudiante,ci',
+            'ci' => 'required|string|max:20|unique:estudiante,ci',
             'nombre' => 'required|string|max:100',
             'apellido' => 'required|string|max:100',
             'celular' => 'nullable|string|max:20',
             'fecha_nacimiento' => 'nullable|date',
             'direccion' => 'nullable|string|max:300',
             'provincia' => 'nullable|string|max:100',
-            'Estado_id' => 'required|exists:Estado_estudiante,id'
+            'Estado_id' => 'required|exists:estado_estudiante,id'
         ]);
 
         DB::beginTransaction();
@@ -149,14 +149,14 @@ class EstudianteController extends Controller
         $estudiante = Estudiante::findOrFail($id);
 
         $request->validate([
-            'ci' => 'required|string|max:20|unique:Estudiante,ci,' . $id,
+            'ci' => 'required|string|max:20|unique:estudiante,ci,' . $id,
             'nombre' => 'required|string|max:100',
             'apellido' => 'required|string|max:100',
             'celular' => 'nullable|string|max:20',
             'fecha_nacimiento' => 'nullable|date',
             'direccion' => 'nullable|string|max:300',
             'provincia' => 'nullable|string|max:100',
-            'Estado_id' => 'required|exists:Estado_estudiante,id'
+            'Estado_id' => 'required|exists:estado_estudiante,id'
         ]);
 
         $estudiante->update($request->validated());

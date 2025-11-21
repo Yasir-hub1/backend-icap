@@ -11,7 +11,7 @@ class Programa extends Model
 {
     protected $table = 'programa';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre',
@@ -88,8 +88,8 @@ class Programa extends Model
      */
     public function modulos(): BelongsToMany
     {
-        return $this->belongsToMany(Modulo::class, 'Programa_modulo', 'programa_id', 'modulo_id', 'id', 'modulo_id')
-                    ->withPivot('estado');
+        return $this->belongsToMany(Modulo::class, 'programa_modulo', 'programa_id', 'modulo_id', 'id', 'modulo_id')
+                    ->withPivot('edicion');
     }
 
     /**
@@ -97,7 +97,7 @@ class Programa extends Model
      */
     public function subprogramas(): BelongsToMany
     {
-        return $this->belongsToMany(Programa::class, 'Programa_subprograma', 'programa_id', 'subprograma_id', 'id', 'id');
+        return $this->belongsToMany(Programa::class, 'programa_subprograma', 'programa_id', 'subprograma_id', 'id', 'id');
     }
 
     /**
@@ -105,7 +105,7 @@ class Programa extends Model
      */
     public function programasPadre(): BelongsToMany
     {
-        return $this->belongsToMany(Programa::class, 'Programa_subprograma', 'subprograma_id', 'programa_id', 'id', 'id');
+        return $this->belongsToMany(Programa::class, 'programa_subprograma', 'subprograma_id', 'programa_id', 'id', 'id');
     }
 
     /**

@@ -27,7 +27,7 @@ class EstudianteRequest extends FormRequest
                 'required',
                 'string',
                 'max:20',
-                Rule::unique('Estudiante', 'ci')->ignore($estudianteId)
+                Rule::unique('estudiante', 'ci')->ignore($estudianteId)
             ],
             'nombre' => 'required|string|max:100',
             'apellido' => 'required|string|max:100',
@@ -36,7 +36,7 @@ class EstudianteRequest extends FormRequest
             'direccion' => 'nullable|string|max:300',
             'fotografia' => 'nullable|string',
             'provincia' => 'nullable|string|max:100',
-            'Estado_id' => 'required|exists:Estado_estudiante,id'
+            'Estado_id' => 'required|exists:estado_estudiante,id'
         ];
     }
 

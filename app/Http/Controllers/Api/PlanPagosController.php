@@ -67,7 +67,7 @@ class PlanPagosController extends Controller
         $request->validate([
             'monto_total' => 'required|numeric|min:0.01',
             'total_cuotas' => 'required|integer|min:1',
-            'Inscripcion_id' => 'required|exists:Inscripcion,id',
+            'Inscripcion_id' => 'required|exists:inscripcion,id',
             'cuotas' => 'required|array|min:1',
             'cuotas.*.fecha_ini' => 'required|date|after_or_equal:today',
             'cuotas.*.fecha_fin' => 'required|date|after:cuotas.*.fecha_ini',

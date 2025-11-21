@@ -10,18 +10,18 @@ class Inscripcion extends Model
 {
     protected $table = 'inscripcion';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'fecha',
-        'registro_estudiante',
-        'descuento_id'
+        'estudiante_id',
+        'programa_id'
     ];
 
     protected $casts = [
         'id' => 'integer',
-        'registro_estudiante' => 'integer',
-        'descuento_id' => 'integer',
+        'estudiante_id' => 'integer',
+        'programa_id' => 'integer',
         'fecha' => 'date'
     ];
 
@@ -30,23 +30,31 @@ class Inscripcion extends Model
      */
     public function estudiante(): BelongsTo
     {
-        return $this->belongsTo(Estudiante::class, 'registro_estudiante', 'registro_estudiante');
+        return $this->belongsTo(Estudiante::class, 'estudiante_id', 'id');
     }
 
     /**
-     * Relación con descuento
+     * Relación con programa
      */
-    public function descuento(): BelongsTo
+    public function programa(): BelongsTo
     {
-        return $this->belongsTo(Descuento::class, 'descuento_id', 'id');
+        return $this->belongsTo(Programa::class, 'programa_id', 'id');
     }
 
     /**
-     * Relación con plan de pagos
+     * Relación con plan de pagos (uno a uno)
      */
-    public function planPagos(): HasOne
+    public function planPago(): HasOne
     {
         return $this->hasOne(PlanPagos::class, 'inscripcion_id', 'id');
+    }
+
+    /**
+     * Relación con descuento (uno a uno)
+     */
+    public function descuento(): HasOne
+    {
+        return $this->hasOne(Descuento::class, 'inscripcion_id', 'id');
     }
 
     /**
@@ -60,9 +68,9 @@ class Inscripcion extends Model
     /**
      * Scope para inscripciones por estudiante
      */
-    public function scopePorEstudiante($query, int $estudianteId)
+    public function scopePorEstudiante($query, $estudianteId)
     {
-        return $query->where('registro_estudiante', $estudianteId);
+        return $query->where('estudiante_id', $estudianteId);
     }
 
     /**
@@ -70,7 +78,7 @@ class Inscripcion extends Model
      */
     public function scopeConDescuento($query)
     {
-        return $query->whereNotNull('descuento_id');
+        return $query->whereHas('descuento');
     }
 
     /**
@@ -78,6 +86,6 @@ class Inscripcion extends Model
      */
     public function scopeSinDescuento($query)
     {
-        return $query->whereNull('descuento_id');
+        return $query->whereDoesntHave('descuento');
     }
 }

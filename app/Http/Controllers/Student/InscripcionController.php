@@ -11,6 +11,7 @@ use App\Models\PlanPagos;
 use App\Models\Cuota;
 use App\Models\Bitacora;
 use App\Models\Descuento;
+use App\Models\Horario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -18,25 +19,210 @@ use Carbon\Carbon;
 class InscripcionController extends Controller
 {
     /**
-     * Registrar inscripción a un programa
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * Listar programas activos disponibles para inscripción
      */
+    public function programasDisponibles(Request $request)
+    {
+        try {
+            $authUser = $request->auth_user;
+            $registroEstudiante = $authUser instanceof Estudiante
+                ? $authUser->registro_estudiante
+                : $authUser->id;
+            $estudiante = Estudiante::findOrFail($registroEstudiante);
+
+            // Validar que el estudiante tenga documentos aprobados
+            if ($estudiante->Estado_id < 4) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Debe tener los documentos aprobados para poder inscribirse',
+                    'estado_actual' => $estudiante->Estado_id,
+                    'estado_requerido' => 4
+                ], 400);
+            }
+
+            // Obtener programas activos con grupos disponibles
+            $programas = Programa::with([
+                'institucion',
+                'ramaAcademica',
+                'tipoPrograma',
+                'grupos' => function ($query) {
+                    $query->where('fecha_fin', '>=', now())
+                          ->with(['horarios', 'docente', 'modulo'])
+                          ->withCount('estudiantes');
+                }
+            ])
+            ->whereHas('institucion', function ($q) {
+                $q->where('estado', 1);
+            })
+            ->get()
+            ->map(function ($programa) use ($registroEstudiante) {
+                // Filtrar grupos con cupos disponibles
+                $gruposDisponibles = $programa->grupos->filter(function ($grupo) {
+                    return $grupo->estudiantes_count < 30; // Cupo máximo
+                })->map(function ($grupo) {
+                    return [
+                        'id' => $grupo->grupo_id,
+                        'modulo' => $grupo->modulo ? $grupo->modulo->nombre : null,
+                        'docente' => $grupo->docente ? $grupo->docente->nombre . ' ' . $grupo->docente->apellido : null,
+                        'fecha_ini' => $grupo->fecha_ini,
+                        'fecha_fin' => $grupo->fecha_fin,
+                        'cupos_disponibles' => 30 - $grupo->estudiantes_count,
+                        'horarios' => $grupo->horarios->map(function ($horario) {
+                            return [
+                                'id' => $horario->horario_id,
+                                'dias' => $horario->dias,
+                                'hora_ini' => $horario->hora_ini ? Carbon::parse($horario->hora_ini)->format('H:i') : null,
+                                'hora_fin' => $horario->hora_fin ? Carbon::parse($horario->hora_fin)->format('H:i') : null,
+                                'aula' => $horario->pivot->aula ?? null
+                            ];
+                        })
+                    ];
+                });
+
+                return [
+                    'id' => $programa->id,
+                    'nombre' => $programa->nombre,
+                    'costo' => $programa->costo,
+                    'duracion_meses' => $programa->duracion_meses,
+                    'institucion' => $programa->institucion ? $programa->institucion->nombre : null,
+                    'rama_academica' => $programa->ramaAcademica ? $programa->ramaAcademica->nombre : null,
+                    'tipo_programa' => $programa->tipoPrograma ? $programa->tipoPrograma->nombre : null,
+                    'grupos_disponibles' => $gruposDisponibles->values(),
+                    'total_grupos' => $gruposDisponibles->count()
+                ];
+            })
+            ->filter(function ($programa) {
+                return $programa['total_grupos'] > 0; // Solo programas con grupos disponibles
+            })
+            ->values();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Programas disponibles obtenidos exitosamente',
+                'data' => $programas
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener programas disponibles',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Verificar conflictos de horario antes de inscribir
+     */
+    public function verificarHorarios(Request $request)
+    {
+        $request->validate([
+            'grupo_id' => 'required|exists:grupo,grupo_id'
+        ]);
+
+        try {
+            $authUser = $request->auth_user;
+            $registroEstudiante = $authUser instanceof Estudiante
+                ? $authUser->registro_estudiante
+                : $authUser->id;
+            $estudiante = Estudiante::findOrFail($registroEstudiante);
+
+            $grupoNuevo = Grupo::with('horarios')->findOrFail($request->grupo_id);
+
+            // Obtener todos los grupos en los que el estudiante ya está inscrito
+            $gruposInscritos = Grupo::whereHas('estudiantes', function ($query) use ($registroEstudiante) {
+                $query->where('registro_estudiante', $registroEstudiante);
+            })
+            ->with('horarios')
+            ->get();
+
+            $conflictos = [];
+
+            foreach ($gruposInscritos as $grupoInscrito) {
+                foreach ($grupoInscrito->horarios as $horarioInscrito) {
+                    foreach ($grupoNuevo->horarios as $horarioNuevo) {
+                        // Verificar si hay conflicto de días
+                        $diasInscrito = explode(',', str_replace(' ', '', strtoupper($horarioInscrito->dias ?? '')));
+                        $diasNuevo = explode(',', str_replace(' ', '', strtoupper($horarioNuevo->dias ?? '')));
+                        $diasComunes = array_intersect($diasInscrito, $diasNuevo);
+
+                        if (!empty($diasComunes)) {
+                            // Verificar si hay conflicto de horas
+                            $horaIniInscrito = $horarioInscrito->hora_ini ? Carbon::parse($horarioInscrito->hora_ini)->format('H:i:s') : null;
+                            $horaFinInscrito = $horarioInscrito->hora_fin ? Carbon::parse($horarioInscrito->hora_fin)->format('H:i:s') : null;
+                            $horaIniNuevo = $horarioNuevo->hora_ini ? Carbon::parse($horarioNuevo->hora_ini)->format('H:i:s') : null;
+                            $horaFinNuevo = $horarioNuevo->hora_fin ? Carbon::parse($horarioNuevo->hora_fin)->format('H:i:s') : null;
+
+                            if ($horaIniInscrito && $horaFinInscrito && $horaIniNuevo && $horaFinNuevo) {
+                                // Verificar solapamiento de horarios
+                                if (($horaIniNuevo >= $horaIniInscrito && $horaIniNuevo < $horaFinInscrito) ||
+                                    ($horaFinNuevo > $horaIniInscrito && $horaFinNuevo <= $horaFinInscrito) ||
+                                    ($horaIniNuevo <= $horaIniInscrito && $horaFinNuevo >= $horaFinInscrito)) {
+                                    $conflictos[] = [
+                                        'grupo_conflicto' => [
+                                            'id' => $grupoInscrito->grupo_id,
+                                            'modulo' => $grupoInscrito->modulo ? $grupoInscrito->modulo->nombre : null,
+                                            'programa' => $grupoInscrito->programa ? $grupoInscrito->programa->nombre : null
+                                        ],
+                                        'horario_conflicto' => [
+                                            'dias' => implode(', ', $diasComunes),
+                                            'hora_ini' => $horaIniInscrito,
+                                            'hora_fin' => $horaFinInscrito
+                                        ],
+                                        'horario_nuevo' => [
+                                            'dias' => $horarioNuevo->dias,
+                                            'hora_ini' => $horaIniNuevo,
+                                            'hora_fin' => $horaFinNuevo
+                                        ]
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'tiene_conflictos' => !empty($conflictos),
+                'conflictos' => $conflictos,
+                'message' => empty($conflictos)
+                    ? 'No hay conflictos de horario'
+                    : 'Se encontraron conflictos de horario'
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al verificar horarios',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Registrar inscripción a un programa
+     */
+    public function crear(Request $request)
+    {
+        return $this->store($request);
+    }
+
     public function store(Request $request)
     {
         $request->validate([
-            'programa_id' => 'required|exists:Programa,id',
-            'grupo_id' => 'nullable|exists:Grupo,id',
-            'descuento_id' => 'nullable|exists:Descuento,id',
-            'numero_cuotas' => 'required|integer|min:1|max:12',
-            'incluir_matricula' => 'boolean'
+            'programa_id' => 'required|exists:programa,id',
+            'grupo_id' => 'required|exists:grupo,grupo_id',
+            'numero_cuotas' => 'required|integer|min:1|max:12'
         ]);
 
         DB::beginTransaction();
         try {
             $authUser = $request->auth_user;
-            $estudiante = Estudiante::findOrFail($authUser->id);
+            $registroEstudiante = $authUser instanceof Estudiante
+                ? $authUser->registro_estudiante
+                : $authUser->id;
+            $estudiante = Estudiante::findOrFail($registroEstudiante);
 
             // Validar Estado_id >= 4 (documentos aprobados)
             if ($estudiante->Estado_id < 4) {
@@ -48,7 +234,7 @@ class InscripcionController extends Controller
                 ], 400);
             }
 
-            $programa = Programa::with(['institucion.convenios'])->findOrFail($request->programa_id);
+            $programa = Programa::with(['institucion'])->findOrFail($request->programa_id);
 
             // Validar que el programa esté activo
             if (!$programa->institucion || $programa->institucion->estado != 1) {
@@ -58,35 +244,79 @@ class InscripcionController extends Controller
                 ], 400);
             }
 
-            // Si se especifica un grupo, validar cupos disponibles
-            $grupo = null;
-            if ($request->grupo_id) {
-                $grupo = Grupo::with('estudiantes')->findOrFail($request->grupo_id);
+            // Validar grupo
+            $grupo = Grupo::with(['estudiantes', 'horarios', 'programa'])->findOrFail($request->grupo_id);
 
-                $cupoMaximo = 30; // Cupo máximo por grupo
-                $estudiantesInscritos = $grupo->estudiantes()->count();
+            // Validar que el grupo sea del programa seleccionado
+            if ($grupo->programa_id != $programa->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El grupo seleccionado no pertenece al programa'
+                ], 400);
+            }
 
-                if ($estudiantesInscritos >= $cupoMaximo) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'El grupo seleccionado no tiene cupos disponibles',
-                        'cupo_maximo' => $cupoMaximo,
-                        'inscritos' => $estudiantesInscritos
-                    ], 400);
-                }
+            // Validar cupos disponibles
+            $cupoMaximo = 30;
+            $estudiantesInscritos = $grupo->estudiantes()->count();
+            if ($estudiantesInscritos >= $cupoMaximo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El grupo seleccionado no tiene cupos disponibles',
+                    'cupo_maximo' => $cupoMaximo,
+                    'inscritos' => $estudiantesInscritos
+                ], 400);
+            }
 
-                // Validar que el grupo sea del programa seleccionado
-                if ($grupo->Programa_id != $programa->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'El grupo seleccionado no pertenece al programa'
-                    ], 400);
+            // Verificar conflictos de horario
+            $gruposInscritos = Grupo::whereHas('estudiantes', function ($query) use ($registroEstudiante) {
+                $query->where('registro_estudiante', $registroEstudiante);
+            })
+            ->with('horarios')
+            ->get();
+
+            foreach ($gruposInscritos as $grupoInscrito) {
+                foreach ($grupoInscrito->horarios as $horarioInscrito) {
+                    foreach ($grupo->horarios as $horarioNuevo) {
+                        $diasInscrito = explode(',', str_replace(' ', '', strtoupper($horarioInscrito->dias ?? '')));
+                        $diasNuevo = explode(',', str_replace(' ', '', strtoupper($horarioNuevo->dias ?? '')));
+                        $diasComunes = array_intersect($diasInscrito, $diasNuevo);
+
+                        if (!empty($diasComunes)) {
+                            $horaIniInscrito = $horarioInscrito->hora_ini ? Carbon::parse($horarioInscrito->hora_ini)->format('H:i:s') : null;
+                            $horaFinInscrito = $horarioInscrito->hora_fin ? Carbon::parse($horarioInscrito->hora_fin)->format('H:i:s') : null;
+                            $horaIniNuevo = $horarioNuevo->hora_ini ? Carbon::parse($horarioNuevo->hora_ini)->format('H:i:s') : null;
+                            $horaFinNuevo = $horarioNuevo->hora_fin ? Carbon::parse($horarioNuevo->hora_fin)->format('H:i:s') : null;
+
+                            if ($horaIniInscrito && $horaFinInscrito && $horaIniNuevo && $horaFinNuevo) {
+                                if (($horaIniNuevo >= $horaIniInscrito && $horaIniNuevo < $horaFinInscrito) ||
+                                    ($horaFinNuevo > $horaIniInscrito && $horaFinNuevo <= $horaFinInscrito) ||
+                                    ($horaIniNuevo <= $horaIniInscrito && $horaFinNuevo >= $horaFinInscrito)) {
+                                    return response()->json([
+                                        'success' => false,
+                                        'message' => 'El horario del grupo seleccionado entra en conflicto con otros grupos en los que ya está inscrito',
+                                        'grupo_conflicto' => [
+                                            'id' => $grupoInscrito->grupo_id,
+                                            'modulo' => $grupoInscrito->modulo ? $grupoInscrito->modulo->nombre : null,
+                                            'programa' => $grupoInscrito->programa ? $grupoInscrito->programa->nombre : null
+                                        ]
+                                    ], 400);
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
             // Verificar que el estudiante no esté ya inscrito en el mismo programa
-            $inscripcionExistente = Inscripcion::where('Estudiante_id', $estudiante->id)
-                ->where('Programa_id', $programa->id)
+            $estudiante = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudiante) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+            $inscripcionExistente = Inscripcion::where('estudiante_id', $estudiante->id)
+                ->where('programa_id', $programa->id)
                 ->first();
 
             if ($inscripcionExistente) {
@@ -97,103 +327,86 @@ class InscripcionController extends Controller
                 ], 400);
             }
 
-            // Crear registro de inscripción
-            $inscripcion = Inscripcion::create([
-                'fecha' => now(),
-                'Programa_id' => $programa->id,
-                'Estudiante_id' => $estudiante->id,
-                'Descuento_id' => $request->descuento_id
-            ]);
-
-            // Calcular monto total con descuentos/convenios
-            $costoBase = $programa->costo;
+            // Calcular monto total
+            $costoBase = $programa->costo ?? 0;
             $montoTotal = $costoBase;
 
             // Aplicar descuento si existe
+            $descuento = null;
             if ($request->descuento_id) {
                 $descuento = Descuento::find($request->descuento_id);
-                if ($descuento) {
+                if ($descuento && $descuento->descuento > 0) {
                     $montoDescuento = $costoBase * ($descuento->descuento / 100);
                     $montoTotal -= $montoDescuento;
                 }
             }
 
-            // Aplicar convenio si existe
-            $convenioAplicado = null;
-            foreach ($programa->institucion->convenios as $convenio) {
-                if ($convenio->esta_activo && $convenio->pivot && $convenio->pivot->porcentaje_participacion > 0) {
-                    $montoConvenio = $costoBase * ($convenio->pivot->porcentaje_participacion / 100);
-                    $montoTotal -= $montoConvenio;
-                    $convenioAplicado = $convenio;
-                    break; // Solo aplicar un convenio
-                }
-            }
-
             $montoTotal = max(0, $montoTotal);
+
+            // Crear registro de inscripción
+            $estudianteObj = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudianteObj) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+            $inscripcion = Inscripcion::create([
+                'fecha' => now()->toDateString(),
+                'estudiante_id' => $estudianteObj->id,
+                'programa_id' => $programa->id
+            ]);
 
             // Generar Plan de Pagos
             $numeroCuotas = $request->numero_cuotas;
-            $incluirMatricula = $request->input('incluir_matricula', true);
-
             $planPagos = PlanPagos::create([
+                'inscripcion_id' => $inscripcion->id,
                 'monto_total' => $montoTotal,
-                'total_cuotas' => $incluirMatricula ? $numeroCuotas + 1 : $numeroCuotas,
-                'Inscripcion_id' => $inscripcion->id
+                'total_cuotas' => $numeroCuotas
             ]);
 
-            // Generar Cuotas
+            // Asociar descuento si existe
+            if ($descuento) {
+                $descuento->inscripcion_id = $inscripcion->id;
+                $descuento->save();
+            }
+
+            // Generar Cuotas mensuales
+            $montoCuota = $montoTotal / $numeroCuotas;
             $cuotas = [];
-
-            if ($incluirMatricula) {
-                // Matrícula: 20% del monto total
-                $montoMatricula = $montoTotal * 0.20;
-                $cuotas[] = Cuota::create([
-                    'fecha_ini' => now(),
-                    'fecha_fin' => now()->addDays(15), // 15 días para pagar matrícula
-                    'monto' => $montoMatricula,
-                    'plan_pagos_id' => $planPagos->id
-                ]);
-
-                // Resto en cuotas mensuales
-                $montoRestante = $montoTotal - $montoMatricula;
-                $montoCuota = $montoRestante / $numeroCuotas;
-            } else {
-                $montoCuota = $montoTotal / $numeroCuotas;
-            }
-
-            // Generar cuotas mensuales
             for ($i = 0; $i < $numeroCuotas; $i++) {
-                $fechaIni = now()->addMonths($incluirMatricula ? $i + 1 : $i);
-                $fechaFin = now()->addMonths($incluirMatricula ? $i + 1 : $i)->endOfMonth();
+                $fechaIni = now()->addMonths($i)->startOfMonth();
+                $fechaFin = now()->addMonths($i)->endOfMonth();
 
                 $cuotas[] = Cuota::create([
-                    'fecha_ini' => $fechaIni,
-                    'fecha_fin' => $fechaFin,
+                    'fecha_ini' => $fechaIni->toDateString(),
+                    'fecha_fin' => $fechaFin->toDateString(),
                     'monto' => round($montoCuota, 2),
-                    'plan_pagos_id' => $planPagos->id
+                    'plan_pago_id' => $planPagos->id
                 ]);
             }
 
-            // Si se especificó un grupo, agregar estudiante al grupo
-            if ($grupo) {
-                $grupo->estudiantes()->attach($estudiante->id, [
-                    'nota' => null,
-                    'estado' => 'ACTIVO'
-                ]);
-            }
+            // Agregar estudiante al grupo
+            $grupo->estudiantes()->attach($registroEstudiante, [
+                'nota' => null,
+                'estado' => 'ACTIVO'
+            ]);
 
             // Cambiar Estado_id del estudiante a 5 (Inscrito)
             $estudiante->Estado_id = 5;
             $estudiante->save();
 
             // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'Inscripcion',
-                'codTable' => $inscripcion->id,
-                'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) se inscribió en el programa '{$programa->nombre}'. Monto total: {$montoTotal} BOB, Cuotas: {$planPagos->total_cuotas}" . ($convenioAplicado ? ", Convenio aplicado: {$convenioAplicado->numero_convenio}" : ''),
-                'Usuario_id' => $estudiante->id
-            ]);
+            $usuario = $estudiante->usuario;
+            if ($usuario) {
+                Bitacora::create([
+                    'fecha' => now()->toDateString(),
+                    'tabla' => 'Inscripcion',
+                    'codTabla' => $inscripcion->id,
+                    'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) se inscribió en el programa '{$programa->nombre}'. Monto total: {$montoTotal} BOB, Cuotas: {$numeroCuotas}",
+                    'usuario_id' => $usuario->usuario_id
+                ]);
+            }
 
             DB::commit();
 
@@ -202,14 +415,13 @@ class InscripcionController extends Controller
                 'message' => 'Inscripción realizada exitosamente',
                 'data' => [
                     'inscripcion' => $inscripcion->load(['programa', 'estudiante', 'descuento']),
-                    'plan_pagos' => $planPagos,
+                    'plan_pago' => $planPagos,
                     'cuotas' => $cuotas,
-                    'grupo' => $grupo,
+                    'grupo' => $grupo->load(['modulo', 'docente', 'horarios']),
                     'resumen' => [
                         'costo_base' => $costoBase,
                         'monto_total' => $montoTotal,
-                        'convenio_aplicado' => $convenioAplicado ? $convenioAplicado->numero_convenio : null,
-                        'total_cuotas' => $planPagos->total_cuotas,
+                        'total_cuotas' => $numeroCuotas,
                         'estado_estudiante' => $estudiante->Estado_id
                     ]
                 ]
@@ -226,46 +438,59 @@ class InscripcionController extends Controller
     }
 
     /**
-     * Listar mis inscripciones con estado de pago
-     *
-     * @return \Illuminate\Http\JsonResponse
+     * Listar mis inscripciones
      */
+    public function listar(Request $request)
+    {
+        return $this->index($request);
+    }
+
     public function index(Request $request)
     {
         try {
             $authUser = $request->auth_user;
             $perPage = $request->input('per_page', 15);
 
+            $registroEstudiante = $authUser instanceof Estudiante
+                ? $authUser->registro_estudiante
+                : $authUser->id;
+
+            $estudiante = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudiante) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+
             $inscripciones = Inscripcion::with([
                 'programa.ramaAcademica',
                 'programa.tipoPrograma',
                 'descuento',
-                'planPagos.cuotas.pagos'
+                'planPago.cuotas.pagos'
             ])
-            ->where('Estudiante_id', $authUser->id)
+            ->where('estudiante_id', $estudiante->id)
             ->orderBy('fecha', 'desc')
             ->paginate($perPage);
 
             // Enriquecer con información de estado de pagos
             $inscripciones->getCollection()->transform(function ($inscripcion) {
-                $planPagos = $inscripcion->planPagos;
+                $planPago = $inscripcion->planPago;
 
-                if ($planPagos) {
-                    $cuotas = $planPagos->cuotas;
+                if ($planPago) {
+                    $cuotas = $planPago->cuotas;
                     $totalCuotas = $cuotas->count();
                     $cuotasPagadas = $cuotas->filter(function ($cuota) {
-                        return $cuota->pagos()->where('verificado', true)->exists();
+                        return $cuota->pagos()->exists();
                     })->count();
-                    $cuotasPendientes = $totalCuotas - $cuotasPagadas;
 
                     $inscripcion->estado_pagos = [
                         'total_cuotas' => $totalCuotas,
                         'cuotas_pagadas' => $cuotasPagadas,
-                        'cuotas_pendientes' => $cuotasPendientes,
-                        'monto_total' => $planPagos->monto_total,
-                        'monto_pagado' => $planPagos->monto_pagado,
-                        'saldo_pendiente' => $planPagos->saldo_pendiente,
-                        'porcentaje_pagado' => $planPagos->porcentaje_pagado
+                        'cuotas_pendientes' => $totalCuotas - $cuotasPagadas,
+                        'monto_total' => $planPago->monto_total,
+                        'monto_pagado' => $planPago->monto_pagado ?? 0,
+                        'monto_pendiente' => $planPago->monto_pendiente ?? $planPago->monto_total
                     ];
                 }
 
@@ -288,43 +513,60 @@ class InscripcionController extends Controller
     }
 
     /**
-     * Detalle de una inscripción con plan de pagos y cuotas
-     *
-     * @param  int  $id
-     * @return \Illuminate\Http\JsonResponse
+     * Detalle de una inscripción
      */
+    public function obtener(Request $request, $id)
+    {
+        return $this->show($request, $id);
+    }
+
     public function show(Request $request, $id)
     {
         try {
             $authUser = $request->auth_user;
+            $registroEstudiante = $authUser instanceof Estudiante
+                ? $authUser->registro_estudiante
+                : $authUser->id;
+
+            $estudiante = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudiante) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
 
             $inscripcion = Inscripcion::with([
                 'programa.ramaAcademica',
                 'programa.tipoPrograma',
                 'programa.modulos',
                 'descuento',
-                'planPagos.cuotas' => function ($query) {
+                'planPago.cuotas' => function ($query) {
                     $query->with('pagos')->orderBy('fecha_ini');
                 }
             ])
-            ->where('Estudiante_id', $authUser->id)
+            ->where('estudiante_id', $estudiante->id)
             ->findOrFail($id);
 
-            // Preparar detalle de cuotas con estado de pago
+            // Preparar detalle de cuotas
             $cuotasDetalle = [];
-            if ($inscripcion->planPagos) {
-                $cuotasDetalle = $inscripcion->planPagos->cuotas->map(function ($cuota, $index) {
-                    $pagoVerificado = $cuota->pagos()->where('verificado', true)->first();
-
+            if ($inscripcion->planPago) {
+                $cuotasDetalle = $inscripcion->planPago->cuotas->map(function ($cuota, $index) {
                     return [
                         'id' => $cuota->id,
                         'numero_cuota' => $index + 1,
                         'fecha_inicio' => $cuota->fecha_ini,
                         'fecha_vencimiento' => $cuota->fecha_fin,
                         'monto' => $cuota->monto,
-                        'estado' => $pagoVerificado ? 'PAGADA' : ($cuota->esta_vencida ? 'VENCIDA' : 'PENDIENTE'),
-                        'fecha_pago' => $pagoVerificado ? $pagoVerificado->fecha : null,
-                        'pago_id' => $pagoVerificado ? $pagoVerificado->id : null
+                        'estado' => $cuota->esta_pagada ? 'PAGADA' : ($cuota->esta_vencida ? 'VENCIDA' : 'PENDIENTE'),
+                        'pagos' => $cuota->pagos->map(function ($pago) {
+                            return [
+                                'id' => $pago->id,
+                                'fecha' => $pago->fecha,
+                                'monto' => $pago->monto,
+                                'token' => $pago->token
+                            ];
+                        })
                     ];
                 });
             }
@@ -333,10 +575,9 @@ class InscripcionController extends Controller
                 'inscripcion' => $inscripcion,
                 'cuotas' => $cuotasDetalle,
                 'resumen_pagos' => [
-                    'monto_total' => $inscripcion->planPagos->monto_total ?? 0,
-                    'monto_pagado' => $inscripcion->planPagos->monto_pagado ?? 0,
-                    'saldo_pendiente' => $inscripcion->planPagos->saldo_pendiente ?? 0,
-                    'porcentaje_pagado' => $inscripcion->planPagos->porcentaje_pagado ?? 0
+                    'monto_total' => $inscripcion->planPago->monto_total ?? 0,
+                    'monto_pagado' => $inscripcion->planPago->monto_pagado ?? 0,
+                    'monto_pendiente' => $inscripcion->planPago->monto_pendiente ?? 0
                 ]
             ];
 

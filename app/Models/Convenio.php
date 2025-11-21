@@ -11,7 +11,7 @@ class Convenio extends Model
 {
     protected $table = 'convenio';
     protected $primaryKey = 'convenio_id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'numero_convenio',
@@ -31,6 +31,19 @@ class Convenio extends Model
         'fecha_fin' => 'date',
         'fecha_firma' => 'date'
     ];
+
+    /**
+     * Atributos adicionales que se deben agregar a la serialización
+     */
+    protected $appends = ['id'];
+
+    /**
+     * Accessor para compatibilidad: devolver convenio_id como id también
+     */
+    public function getIdAttribute()
+    {
+        return $this->attributes['convenio_id'] ?? null;
+    }
 
     /**
      * Relación con tipo de convenio
@@ -53,7 +66,7 @@ class Convenio extends Model
      */
     public function instituciones(): BelongsToMany
     {
-        return $this->belongsToMany(Institucion::class, 'Institucion_convenio', 'convenio_id', 'institucion_id')
+        return $this->belongsToMany(Institucion::class, 'institucion_convenio', 'convenio_id', 'institucion_id')
                     ->withPivot(['porcentaje_participacion', 'monto_asignado', 'estado'])
                     ->withTimestamps();
     }
@@ -63,7 +76,7 @@ class Convenio extends Model
      */
     public function scopeActivos($query)
     {
-        return $query->where('fecha_fin', '>=', now());
+        return $query->where('fecha_fin', '>=', now()->toDateString());
     }
 
     /**

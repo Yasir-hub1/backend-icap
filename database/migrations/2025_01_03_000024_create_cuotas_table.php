@@ -13,17 +13,17 @@ return new class extends Migration
     {
         Schema::create('cuotas', function (Blueprint $table) {
             $table->id();
-            $table->date('fecha_ini');
-            $table->date('fecha_fin');
-            $table->decimal('monto', 10, 2);
-            $table->unsignedBigInteger('plan_pagos_id');
+            $table->date('fecha_ini')->nullable();
+            $table->date('fecha_fin')->nullable();
+            $table->decimal('monto', 10, 2)->nullable();
+            $table->unsignedBigInteger('plan_pago_id')->nullable();
             $table->timestamps();
 
             // Foreign key
-            $table->foreign('plan_pagos_id')->references('id')->on('plan_pagos')->onDelete('cascade');
+            $table->foreign('plan_pago_id')->references('id')->on('plan_pago')->onDelete('set null');
 
-            // Indexes
-            $table->index('plan_pagos_id');
+            // Índices
+            $table->index('plan_pago_id');
             $table->index('fecha_ini');
             $table->index('fecha_fin');
         });
@@ -37,3 +37,4 @@ return new class extends Migration
         Schema::dropIfExists('cuotas');
     }
 };
+

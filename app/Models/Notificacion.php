@@ -35,7 +35,8 @@ class Notificacion extends Model
     public function usuario()
     {
         if ($this->usuario_tipo === 'student') {
-            return $this->belongsTo(Estudiante::class, 'usuario_id');
+            // Estudiante usa registro_estudiante como clave primaria
+            return $this->belongsTo(Estudiante::class, 'usuario_id', 'registro_estudiante');
         } elseif ($this->usuario_tipo === 'teacher' || $this->usuario_tipo === 'admin') {
             return $this->belongsTo(Docente::class, 'usuario_id');
         }

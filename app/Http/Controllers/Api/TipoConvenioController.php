@@ -49,7 +49,7 @@ class TipoConvenioController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'nombre_tipo' => 'required|string|max:100|unique:Tipo_convenio,nombre_tipo',
+            'nombre_tipo' => 'required|string|max:100|unique:tipo_convenio,nombre_tipo',
             'descripcion' => 'nullable|string'
         ]);
 
@@ -72,7 +72,7 @@ class TipoConvenioController extends Controller
         $tipo = TipoConvenio::findOrFail($id);
 
         $request->validate([
-            'nombre_tipo' => 'required|string|max:100|unique:Tipo_convenio,nombre_tipo,' . $id,
+            'nombre_tipo' => 'required|string|max:100|unique:tipo_convenio,nombre_tipo,' . $id,
             'descripcion' => 'nullable|string'
         ]);
 

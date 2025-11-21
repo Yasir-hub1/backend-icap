@@ -8,6 +8,14 @@ use Illuminate\Http\Request;
 class NotaController extends Controller
 {
     /**
+     * Obtener todas mis notas de todos los grupos (alias para listar)
+     */
+    public function listar(Request $request)
+    {
+        return $this->index($request);
+    }
+
+    /**
      * Obtener todas mis notas de todos los grupos
      */
     public function index(Request $request)
@@ -65,6 +73,14 @@ class NotaController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Obtener nota de un grupo específico (alias para obtener)
+     */
+    public function obtener(Request $request, $grupoId)
+    {
+        return $this->show($request, $grupoId);
     }
 
     /**

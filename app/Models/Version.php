@@ -9,7 +9,7 @@ class Version extends Model
 {
     protected $table = 'version';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre',

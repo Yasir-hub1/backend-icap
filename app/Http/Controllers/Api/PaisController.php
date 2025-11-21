@@ -49,7 +49,7 @@ class PaisController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'nombre_pais' => 'required|string|max:100|unique:Pais,nombre_pais',
+            'nombre_pais' => 'required|string|max:100|unique:pais,nombre_pais',
             'codigo_iso' => 'nullable|string|max:3',
             'codigo_telefono' => 'nullable|string|max:10'
         ]);
@@ -73,7 +73,7 @@ class PaisController extends Controller
         $pais = Pais::findOrFail($id);
 
         $request->validate([
-            'nombre_pais' => 'required|string|max:100|unique:Pais,nombre_pais,' . $id,
+            'nombre_pais' => 'required|string|max:100|unique:pais,nombre_pais,' . $id,
             'codigo_iso' => 'nullable|string|max:3',
             'codigo_telefono' => 'nullable|string|max:10'
         ]);

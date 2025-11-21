@@ -20,9 +20,9 @@ class InscripcionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'Programa_id' => 'required|exists:Programa,id',
-            'Estudiante_id' => 'required|exists:Estudiante,id',
-            'Descuento_id' => 'nullable|exists:Descuento,id',
+            'Programa_id' => 'required|exists:programa,id',
+            'Estudiante_id' => 'required|exists:estudiante,id',
+            'Descuento_id' => 'nullable|exists:descuento,id',
             'plan_pagos' => 'nullable|array',
             'plan_pagos.total_cuotas' => 'required_with:plan_pagos|integer|min:1|max:24',
             'plan_pagos.cuotas' => 'required_with:plan_pagos|array|min:1',

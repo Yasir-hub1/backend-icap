@@ -9,7 +9,7 @@ class Pais extends Model
 {
     protected $table = 'pais';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre_pais',
@@ -39,5 +39,13 @@ class Pais extends Model
     public function scopePorCodigoIso($query, string $codigo)
     {
         return $query->where('codigo_iso', $codigo);
+    }
+
+    /**
+     * Scope para países activos (todos por defecto, puede extenderse)
+     */
+    public function scopeActivos($query)
+    {
+        return $query;
     }
 }

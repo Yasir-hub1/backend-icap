@@ -6,23 +6,105 @@ use App\Http\Controllers\Controller;
 use App\Models\Notificacion;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 
 class NotificacionController extends Controller
 {
+    /**
+     * Helper para obtener usuarioId y usuarioTipo desde el request
+     */
+    private function obtenerUsuarioInfo(Request $request)
+    {
+        try {
+            $usuario = $request->auth_user;
+
+            if (!$usuario) {
+                Log::warning('NotificacionController: No se encontró auth_user en request');
+                return [null, null];
+            }
+
+            $usuarioId = null;
+            $usuarioTipo = null;
+
+            if ($usuario instanceof \App\Models\Estudiante) {
+                $usuarioId = $usuario->registro_estudiante;
+                $usuarioTipo = 'student';
+            } elseif ($usuario instanceof \App\Models\Docente) {
+                $usuarioId = $usuario->id;
+                $usuarioTipo = $usuario->cargo === 'Administrador' ? 'admin' : 'teacher';
+            } elseif ($usuario instanceof \App\Models\Usuario) {
+                if (!$usuario->relationLoaded('rol')) {
+                    $usuario->load('rol');
+                }
+
+                if ($usuario->rol) {
+                    $rolNombre = strtoupper($usuario->rol->nombre_rol);
+                    if ($rolNombre === 'ADMIN') {
+                        $usuarioTipo = 'admin';
+                        // Para ADMIN, usar el usuario_id del modelo Usuario
+                        $usuarioId = $usuario->usuario_id ?? $usuario->id;
+                    } elseif ($rolNombre === 'DOCENTE') {
+                        $usuarioTipo = 'teacher';
+                        $docente = \App\Models\Docente::where('persona_id', $usuario->persona_id)->first();
+                        $usuarioId = $docente ? $docente->id : ($usuario->usuario_id ?? $usuario->id);
+                    } else {
+                        // Si no es ADMIN ni DOCENTE, intentar como admin por defecto
+                        $usuarioTipo = 'admin';
+                        $usuarioId = $usuario->usuario_id ?? $usuario->id;
+                    }
+                } else {
+                    // Si no tiene rol, asumir admin
+                    $usuarioTipo = 'admin';
+                    $usuarioId = $usuario->usuario_id ?? $usuario->id;
+                }
+            }
+
+            Log::info('NotificacionController: Usuario identificado', [
+                'usuario_id' => $usuarioId,
+                'usuario_tipo' => $usuarioTipo,
+                'usuario_class' => get_class($usuario)
+            ]);
+
+            return [$usuarioId, $usuarioTipo];
+        } catch (\Exception $e) {
+            Log::error('NotificacionController: Error en obtenerUsuarioInfo', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return [null, null];
+        }
+    }
+
     /**
      * Obtener notificaciones del usuario actual
      */
     public function index(Request $request)
     {
         try {
-            $usuarioId = $request->user_id;
-            $usuarioTipo = $request->user_type;
+            [$usuarioId, $usuarioTipo] = $this->obtenerUsuarioInfo($request);
+
+            if (!$usuarioId || !$usuarioTipo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado o tipo no válido'
+                ], 401);
+            }
 
             $query = Notificacion::porUsuario($usuarioId, $usuarioTipo)
                                 ->orderBy('fecha_envio', 'desc');
 
             // Filtros opcionales
-            if ($request->has('no_leidas') && $request->no_leidas) {
+            // Manejar parámetro 'leida' (true/false) o 'no_leidas' (boolean)
+            if ($request->has('leida')) {
+                $leida = filter_var($request->leida, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($leida !== null) {
+                    if ($leida) {
+                        $query->where('leida', true);
+                    } else {
+                        $query->noLeidas();
+                    }
+                }
+            } elseif ($request->has('no_leidas') && $request->no_leidas) {
                 $query->noLeidas();
             }
 
@@ -36,16 +118,29 @@ class NotificacionController extends Controller
 
             $notificaciones = $query->paginate($request->get('per_page', 20));
 
+            // Obtener contador de no leídas
+            $noLeidas = Notificacion::porUsuario($usuarioId, $usuarioTipo)
+                                   ->noLeidas()
+                                   ->count();
+
             return response()->json([
                 'success' => true,
-                'data' => $notificaciones
+                'data' => $notificaciones,
+                'no_leidas' => $noLeidas
             ]);
 
         } catch (\Exception $e) {
+            Log::error('Error en NotificacionController@index', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'usuario_id' => $usuarioId ?? null,
+                'usuario_tipo' => $usuarioTipo ?? null
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener notificaciones',
-                'error' => $e->getMessage()
+                'error' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
     }
@@ -56,8 +151,14 @@ class NotificacionController extends Controller
     public function contador(Request $request)
     {
         try {
-            $usuarioId = $request->user_id;
-            $usuarioTipo = $request->user_type;
+            [$usuarioId, $usuarioTipo] = $this->obtenerUsuarioInfo($request);
+
+            if (!$usuarioId || !$usuarioTipo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado o tipo no válido'
+                ], 401);
+            }
 
             $contador = Notificacion::porUsuario($usuarioId, $usuarioTipo)
                                    ->noLeidas()
@@ -66,15 +167,21 @@ class NotificacionController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'contador' => $contador
+                    'count' => $contador,
+                    'contador' => $contador // Alias para compatibilidad
                 ]
             ]);
 
         } catch (\Exception $e) {
+            Log::error('Error en NotificacionController@contador', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener contador',
-                'error' => $e->getMessage()
+                'error' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
     }
@@ -85,8 +192,14 @@ class NotificacionController extends Controller
     public function marcarLeida(Request $request, $id)
     {
         try {
-            $usuarioId = $request->user_id;
-            $usuarioTipo = $request->user_type;
+            [$usuarioId, $usuarioTipo] = $this->obtenerUsuarioInfo($request);
+
+            if (!$usuarioId || !$usuarioTipo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado o tipo no válido'
+                ], 401);
+            }
 
             $notificacion = Notificacion::porUsuario($usuarioId, $usuarioTipo)
                                        ->findOrFail($id);
@@ -114,8 +227,14 @@ class NotificacionController extends Controller
     public function marcarTodasLeidas(Request $request)
     {
         try {
-            $usuarioId = $request->user_id;
-            $usuarioTipo = $request->user_type;
+            [$usuarioId, $usuarioTipo] = $this->obtenerUsuarioInfo($request);
+
+            if (!$usuarioId || !$usuarioTipo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado o tipo no válido'
+                ], 401);
+            }
 
             $actualizadas = Notificacion::porUsuario($usuarioId, $usuarioTipo)
                                        ->noLeidas()
@@ -147,8 +266,14 @@ class NotificacionController extends Controller
     public function destroy(Request $request, $id)
     {
         try {
-            $usuarioId = $request->user_id;
-            $usuarioTipo = $request->user_type;
+            [$usuarioId, $usuarioTipo] = $this->obtenerUsuarioInfo($request);
+
+            if (!$usuarioId || !$usuarioTipo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado o tipo no válido'
+                ], 401);
+            }
 
             $notificacion = Notificacion::porUsuario($usuarioId, $usuarioTipo)
                                        ->findOrFail($id);
@@ -222,8 +347,14 @@ class NotificacionController extends Controller
     public function estadisticas(Request $request)
     {
         try {
-            $usuarioId = $request->user_id;
-            $usuarioTipo = $request->user_type;
+            [$usuarioId, $usuarioTipo] = $this->obtenerUsuarioInfo($request);
+
+            if (!$usuarioId || !$usuarioTipo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado o tipo no válido'
+                ], 401);
+            }
 
             $estadisticas = [
                 'total' => Notificacion::porUsuario($usuarioId, $usuarioTipo)->count(),
@@ -282,7 +413,7 @@ class NotificacionController extends Controller
 
                 foreach ($estudiantes as $estudiante) {
                     Notificacion::crearNotificacion(
-                        $estudiante->id,
+                        $estudiante->registro_estudiante,
                         'student',
                         $request->titulo,
                         $request->mensaje,

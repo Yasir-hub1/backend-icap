@@ -4,405 +4,500 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Grupo;
-use App\Models\Estudiante;
 use App\Models\Programa;
+use App\Models\Modulo;
 use App\Models\Docente;
 use App\Models\Horario;
-use App\Models\Bitacora;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class GrupoController extends Controller
 {
     /**
-     * Listar todos los grupos con información resumida
+     * Listar grupos con paginación
      */
-    public function index(Request $request)
+    public function listar(Request $request): JsonResponse
     {
         try {
-            $perPage = $request->input('per_page', 15);
-            $search = $request->input('search', '');
-            $programaId = $request->input('programa_id', '');
-            $docenteId = $request->input('docente_id', '');
+            $perPage = $request->get('per_page', 15);
+            $search = $request->get('search', '');
+            $programaId = $request->get('programa_id', '');
+            $moduloId = $request->get('modulo_id', '');
+            $docenteId = $request->get('docente_id', '');
 
-            $grupos = Grupo::with([
-                    'programa',
-                    'docente',
-                    'horario'
-                ])
-                ->withCount('estudiantes')
-                ->when($search, function ($query) use ($search) {
-                    $query->whereHas('programa', function ($q) use ($search) {
-                        $q->where('nombre', 'ILIKE', "%{$search}%");
+            $query = Grupo::with([
+                'programa:id,nombre',
+                'modulo:modulo_id,nombre',
+                'docente:id,nombre,apellido',
+                'horarios'
+            ])->withCount('estudiantes');
+
+            if ($search) {
+                $query->where(function($q) use ($search) {
+                    $q->whereHas('programa', function($q2) use ($search) {
+                        $q2->where('nombre', 'ILIKE', "%{$search}%");
                     })
-                    ->orWhereHas('docente', function ($q) use ($search) {
-                        $q->where('nombre', 'ILIKE', "%{$search}%")
-                          ->orWhere('apellido', 'ILIKE', "%{$search}%");
+                    ->orWhereHas('modulo', function($q2) use ($search) {
+                        $q2->where('nombre', 'ILIKE', "%{$search}%");
+                    })
+                    ->orWhereHas('docente', function($q2) use ($search) {
+                        $q2->where('nombre', 'ILIKE', "%{$search}%")
+                           ->orWhere('apellido', 'ILIKE', "%{$search}%");
                     });
-                })
-                ->when($programaId, function ($query) use ($programaId) {
-                    $query->where('Programa_id', $programaId);
-                })
-                ->when($docenteId, function ($query) use ($docenteId) {
-                    $query->where('Docente_id', $docenteId);
-                })
-                ->orderBy('fecha_ini', 'desc')
-                ->paginate($perPage);
+                });
+            }
 
-            $grupos->getCollection()->transform(function ($grupo) {
-                return [
-                    'id' => $grupo->id,
-                    'programa' => $grupo->programa->nombre,
-                    'docente' => $grupo->docente ? $grupo->docente->nombre . ' ' . $grupo->docente->apellido : 'Sin asignar',
-                    'fecha_ini' => $grupo->fecha_ini,
-                    'fecha_fin' => $grupo->fecha_fin,
-                    'horario' => $grupo->horario ? $grupo->horario->descripcion : 'Sin horario',
-                    'total_estudiantes' => $grupo->estudiantes_count,
-                    'esta_activo' => $grupo->esta_activo,
-                    'duracion_dias' => $grupo->duracion_dias
-                ];
-            });
+            if ($programaId) {
+                $query->where('programa_id', $programaId);
+            }
+
+            if ($moduloId) {
+                $query->where('modulo_id', $moduloId);
+            }
+
+            if ($docenteId) {
+                $query->where('docente_id', $docenteId);
+            }
+
+            $grupos = $query->orderBy('fecha_ini', 'desc')
+                           ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Grupos obtenidos exitosamente',
-                'data' => $grupos
-            ], 200);
-
+                'data' => $grupos,
+                'message' => 'Grupos obtenidos exitosamente'
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al obtener grupos',
-                'error' => $e->getMessage()
-            ], 500);
+                'message' => 'Error al obtener grupos: ' . (config('app.debug') ? $e->getMessage() : 'Error interno del servidor')
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
     }
 
     /**
-     * Ver detalle de un grupo con estudiantes
+     * Obtener grupo por ID
      */
-    public function show($grupoId)
+    public function obtener($id): JsonResponse
     {
         try {
-            $grupo = Grupo::with([
-                    'programa.tipoPrograma',
-                    'docente',
-                    'horario',
-                    'estudiantes' => function ($query) {
-                        $query->orderBy('nombre')->orderBy('apellido');
-                    }
-                ])
-                ->findOrFail($grupoId);
+            $id = (int) $id;
 
-            $estudiantes = $grupo->estudiantes->map(function ($estudiante) {
-                return [
-                    'id' => $estudiante->id,
-                    'nombre_completo' => $estudiante->nombre . ' ' . $estudiante->apellido,
-                    'ci' => $estudiante->ci,
-                    'registro' => $estudiante->registro_estudiante,
-                    'nota' => $estudiante->pivot->nota,
-                    'estado' => $estudiante->pivot->estado,
-                    'aprobado' => $estudiante->pivot->nota >= 51
-                ];
-            });
+            if ($id <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ID de grupo inválido'
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            $grupo = Grupo::with([
+                'programa',
+                'modulo',
+                'docente',
+                'horarios' => function($query) {
+                    $query->withPivot('aula');
+                },
+                'estudiantes'
+            ])->find($id);
+
+            if (!$grupo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Grupo no encontrado'
+                ], 404)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Detalle de grupo obtenido exitosamente',
-                'data' => [
-                    'grupo' => [
-                        'id' => $grupo->id,
-                        'fecha_ini' => $grupo->fecha_ini,
-                        'fecha_fin' => $grupo->fecha_fin,
-                        'esta_activo' => $grupo->esta_activo
-                    ],
-                    'programa' => $grupo->programa,
-                    'docente' => $grupo->docente,
-                    'horario' => $grupo->horario,
-                    'estudiantes' => $estudiantes,
-                    'estadisticas' => [
-                        'total_estudiantes' => $estudiantes->count(),
-                        'con_notas' => $estudiantes->where('nota', '!=', null)->count(),
-                        'aprobados' => $estudiantes->where('aprobado', true)->count(),
-                        'reprobados' => $estudiantes->where('nota', '!=', null)->where('aprobado', false)->count()
-                    ]
-                ]
-            ], 200);
-
+                'data' => $grupo,
+                'message' => 'Grupo obtenido exitosamente'
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al obtener detalle del grupo',
-                'error' => $e->getMessage()
-            ], 500);
+                'message' => 'Error al obtener grupo: ' . (config('app.debug') ? $e->getMessage() : 'Error interno del servidor')
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
     }
 
     /**
      * Crear nuevo grupo
      */
-    public function store(Request $request)
+    public function crear(Request $request): JsonResponse
     {
-        $request->validate([
+        $validator = Validator::make($request->all(), [
             'fecha_ini' => 'required|date',
             'fecha_fin' => 'required|date|after:fecha_ini',
-            'programa_id' => 'required|exists:Programa,id',
-            'docente_id' => 'required|exists:Docente,id',
-            'horario_id' => 'nullable|exists:Horario,id'
+            'programa_id' => 'required|integer|exists:programa,id',
+            'modulo_id' => 'required|integer|exists:modulo,modulo_id',
+            'docente_id' => 'required|integer|exists:docente,id',
+            'horarios' => 'nullable|array',
+            'horarios.*.horario_id' => 'required|integer|exists:horario,horario_id',
+            'horarios.*.aula' => 'nullable|string|max:50'
+        ], [
+            'fecha_ini.required' => 'La fecha de inicio es obligatoria',
+            'fecha_ini.date' => 'La fecha de inicio debe ser una fecha válida',
+            'fecha_fin.required' => 'La fecha de fin es obligatoria',
+            'fecha_fin.date' => 'La fecha de fin debe ser una fecha válida',
+            'fecha_fin.after' => 'La fecha de fin debe ser mayor a la fecha de inicio',
+            'programa_id.required' => 'El programa es obligatorio',
+            'programa_id.exists' => 'El programa seleccionado no existe',
+            'modulo_id.required' => 'El módulo es obligatorio',
+            'modulo_id.exists' => 'El módulo seleccionado no existe',
+            'docente_id.required' => 'El docente es obligatorio',
+            'docente_id.exists' => 'El docente seleccionado no existe',
+            'horarios.*.horario_id.required' => 'El horario es obligatorio',
+            'horarios.*.horario_id.exists' => 'El horario seleccionado no existe',
+            'horarios.*.aula.max' => 'El nombre del aula no puede tener más de 50 caracteres'
         ]);
 
-        DB::beginTransaction();
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación. Por favor, revisa los campos marcados',
+                'errors' => $validator->errors()
+            ], 422)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        }
+
         try {
-            $admin = $request->auth_user;
+            DB::beginTransaction();
 
-            $grupo = Grupo::create([
-                'fecha_ini' => $request->fecha_ini,
-                'fecha_fin' => $request->fecha_fin,
-                'Programa_id' => $request->programa_id,
-                'Docente_id' => $request->docente_id,
-                'horario_id' => $request->horario_id
-            ]);
+            $data = $validator->validated();
+            $horarios = $data['horarios'] ?? [];
+            unset($data['horarios']);
 
-            $programa = Programa::find($request->programa_id);
-            $docente = Docente::find($request->docente_id);
+            // Crear grupo
+            $grupo = Grupo::create($data);
 
-            // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'Grupo',
-                'codTable' => $grupo->id,
-                'transaccion' => "Grupo creado para el programa '{$programa->nombre}' con docente {$docente->nombre} {$docente->apellido}. Fecha inicio: {$request->fecha_ini}, Fecha fin: {$request->fecha_fin}",
-                'Usuario_id' => $admin->id
-            ]);
+            // Asociar horarios
+            if (!empty($horarios)) {
+                $horariosData = [];
+                foreach ($horarios as $horario) {
+                    $horariosData[$horario['horario_id']] = [
+                        'aula' => $horario['aula'] ?? null
+                    ];
+                }
+                $grupo->horarios()->attach($horariosData);
+            }
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Grupo creado exitosamente',
-                'data' => $grupo->load(['programa', 'docente', 'horario'])
-            ], 201);
-
+                'data' => $grupo->load(['programa', 'modulo', 'docente', 'horarios']),
+                'message' => 'Grupo creado exitosamente'
+            ], 201)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
                 'success' => false,
-                'message' => 'Error al crear grupo',
-                'error' => $e->getMessage()
-            ], 500);
+                'message' => 'Error al crear grupo: ' . (config('app.debug') ? $e->getMessage() : 'Error interno del servidor')
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
     }
 
     /**
      * Actualizar grupo
      */
-    public function update(Request $request, $grupoId)
+    public function actualizar(Request $request, $id): JsonResponse
     {
-        $request->validate([
-            'fecha_ini' => 'sometimes|date',
-            'fecha_fin' => 'sometimes|date|after:fecha_ini',
-            'programa_id' => 'sometimes|exists:Programa,id',
-            'docente_id' => 'sometimes|exists:Docente,id',
-            'horario_id' => 'nullable|exists:Horario,id'
-        ]);
-
-        DB::beginTransaction();
         try {
-            $admin = $request->auth_user;
-            $grupo = Grupo::findOrFail($grupoId);
+            $id = (int) $id;
 
-            $grupo->update($request->only([
-                'fecha_ini',
-                'fecha_fin',
-                'Programa_id',
-                'Docente_id',
-                'horario_id'
-            ]));
-
-            // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'Grupo',
-                'codTable' => $grupo->id,
-                'transaccion' => "Grupo ID {$grupo->id} actualizado",
-                'Usuario_id' => $admin->id
-            ]);
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Grupo actualizado exitosamente',
-                'data' => $grupo->load(['programa', 'docente', 'horario'])
-            ], 200);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al actualizar grupo',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Asignar estudiantes a un grupo
-     */
-    public function assignStudents(Request $request, $grupoId)
-    {
-        $request->validate([
-            'estudiante_ids' => 'required|array',
-            'estudiante_ids.*' => 'exists:Estudiante,id'
-        ]);
-
-        DB::beginTransaction();
-        try {
-            $admin = $request->auth_user;
-            $grupo = Grupo::with('programa')->findOrFail($grupoId);
-
-            // Validar que los estudiantes estén en estado 4 (aptos para inscripción)
-            $estudiantesNoAptos = Estudiante::whereIn('id', $request->estudiante_ids)
-                ->where('Estado_id', '<', 4)
-                ->get();
-
-            if ($estudiantesNoAptos->count() > 0) {
+            if ($id <= 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Algunos estudiantes no están aptos para ser asignados (Estado_id debe ser >= 4)',
-                    'estudiantes_no_aptos' => $estudiantesNoAptos->pluck('registro_estudiante')
-                ], 400);
+                    'message' => 'ID de grupo inválido'
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
             }
 
-            // Asignar estudiantes al grupo (sin duplicar)
-            $nuevosEstudiantes = [];
-            foreach ($request->estudiante_ids as $estudianteId) {
-                // Verificar si ya está en el grupo
-                if (!$grupo->estudiantes()->where('Estudiante_id', $estudianteId)->exists()) {
-                    $grupo->estudiantes()->attach($estudianteId, [
-                        'nota' => null,
-                        'estado' => 'ACTIVO'
-                    ]);
-                    $nuevosEstudiantes[] = $estudianteId;
-                }
-            }
+            $grupo = Grupo::find($id);
 
-            // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'grupo_estudiante',
-                'codTable' => $grupo->id,
-                'transaccion' => count($nuevosEstudiantes) . " estudiantes asignados al grupo del programa '{$grupo->programa->nombre}'",
-                'Usuario_id' => $admin->id
-            ]);
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => count($nuevosEstudiantes) . ' estudiantes asignados exitosamente',
-                'data' => [
-                    'grupo_id' => $grupo->id,
-                    'estudiantes_asignados' => count($nuevosEstudiantes),
-                    'total_estudiantes_grupo' => $grupo->estudiantes()->count()
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al asignar estudiantes',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Quitar estudiante de un grupo
-     */
-    public function removeStudent(Request $request, $grupoId, $estudianteId)
-    {
-        DB::beginTransaction();
-        try {
-            $admin = $request->auth_user;
-            $grupo = Grupo::with('programa')->findOrFail($grupoId);
-            $estudiante = Estudiante::findOrFail($estudianteId);
-
-            // Verificar que el estudiante esté en el grupo
-            if (!$grupo->estudiantes()->where('Estudiante_id', $estudianteId)->exists()) {
+            if (!$grupo) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'El estudiante no está en este grupo'
-                ], 400);
+                    'message' => 'Grupo no encontrado'
+                ], 404)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
             }
 
-            $grupo->estudiantes()->detach($estudianteId);
-
-            // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'grupo_estudiante',
-                'codTable' => $grupo->id,
-                'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) removido del grupo del programa '{$grupo->programa->nombre}'",
-                'Usuario_id' => $admin->id
+            $validator = Validator::make($request->all(), [
+                'fecha_ini' => 'sometimes|required|date',
+                'fecha_fin' => 'sometimes|required|date|after:fecha_ini',
+                'programa_id' => 'sometimes|required|integer|exists:programa,id',
+                'modulo_id' => 'sometimes|required|integer|exists:modulo,modulo_id',
+                'docente_id' => 'sometimes|required|integer|exists:docente,id',
+                'horarios' => 'nullable|array',
+                'horarios.*.horario_id' => 'required|integer|exists:horario,horario_id',
+                'horarios.*.aula' => 'nullable|string|max:50'
+            ], [
+                'fecha_ini.required' => 'La fecha de inicio es obligatoria',
+                'fecha_ini.date' => 'La fecha de inicio debe ser una fecha válida',
+                'fecha_fin.required' => 'La fecha de fin es obligatoria',
+                'fecha_fin.date' => 'La fecha de fin debe ser una fecha válida',
+                'fecha_fin.after' => 'La fecha de fin debe ser mayor a la fecha de inicio',
+                'programa_id.required' => 'El programa es obligatorio',
+                'programa_id.exists' => 'El programa seleccionado no existe',
+                'modulo_id.required' => 'El módulo es obligatorio',
+                'modulo_id.exists' => 'El módulo seleccionado no existe',
+                'docente_id.required' => 'El docente es obligatorio',
+                'docente_id.exists' => 'El docente seleccionado no existe',
+                'horarios.*.horario_id.required' => 'El horario es obligatorio',
+                'horarios.*.horario_id.exists' => 'El horario seleccionado no existe',
+                'horarios.*.aula.max' => 'El nombre del aula no puede tener más de 50 caracteres'
             ]);
 
-            DB::commit();
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error de validación. Por favor, revisa los campos marcados',
+                    'errors' => $validator->errors()
+                ], 422)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Estudiante removido del grupo exitosamente'
-            ], 200);
+            DB::beginTransaction();
 
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al remover estudiante',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
+            $data = $validator->validated();
+            $horarios = $data['horarios'] ?? null;
+            unset($data['horarios']);
 
-    /**
-     * Obtener estudiantes disponibles para asignar a un grupo
-     */
-    public function getAvailableStudents(Request $request, $grupoId)
-    {
-        try {
-            $grupo = Grupo::with('programa')->findOrFail($grupoId);
+            // Actualizar grupo
+            $grupo->update($data);
 
-            // Estudiantes con Estado_id >= 4 que NO estén ya en este grupo
-            $estudiantesDisponibles = Estudiante::where('Estado_id', '>=', 4)
-                ->whereDoesntHave('grupos', function ($query) use ($grupoId) {
-                    $query->where('Grupo_id', $grupoId);
-                })
-                ->orderBy('nombre')
-                ->orderBy('apellido')
-                ->get()
-                ->map(function ($estudiante) {
-                    return [
-                        'id' => $estudiante->id,
-                        'nombre_completo' => $estudiante->nombre . ' ' . $estudiante->apellido,
-                        'ci' => $estudiante->ci,
-                        'registro' => $estudiante->registro_estudiante,
-                        'estado_id' => $estudiante->Estado_id
+            // Actualizar horarios si se proporcionaron
+            if ($horarios !== null) {
+                $horariosData = [];
+                foreach ($horarios as $horario) {
+                    $horariosData[$horario['horario_id']] = [
+                        'aula' => $horario['aula'] ?? null
                     ];
-                });
+                }
+                $grupo->horarios()->sync($horariosData);
+            }
+
+            DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Estudiantes disponibles obtenidos exitosamente',
-                'data' => $estudiantesDisponibles
-            ], 200);
+                'data' => $grupo->load(['programa', 'modulo', 'docente', 'horarios']),
+                'message' => 'Grupo actualizado exitosamente'
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al actualizar grupo: ' . (config('app.debug') ? $e->getMessage() : 'Error interno del servidor')
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        }
+    }
 
+    /**
+     * Eliminar grupo
+     */
+    public function eliminar($id): JsonResponse
+    {
+        try {
+            $id = (int) $id;
+
+            if ($id <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ID de grupo inválido'
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            $grupo = Grupo::find($id);
+
+            if (!$grupo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Grupo no encontrado'
+                ], 404)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Verificar si tiene estudiantes
+            if ($grupo->estudiantes()->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No se puede eliminar el grupo porque tiene estudiantes asignados'
+            ], 422)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            DB::beginTransaction();
+
+            // Desasociar horarios
+            $grupo->horarios()->detach();
+
+            $grupo->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Grupo eliminado exitosamente'
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al eliminar grupo: ' . (config('app.debug') ? $e->getMessage() : 'Error interno del servidor')
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        }
+    }
+
+    /**
+     * Obtener datos para formularios
+     */
+    public function datosFormulario(): JsonResponse
+    {
+        try {
+            // Obtener programas - asegurar que se devuelvan como array
+            $programas = Programa::select('id', 'nombre')
+                ->orderBy('nombre')
+                ->get()
+                ->map(function($programa) {
+                    return [
+                        'id' => $programa->id,
+                        'nombre' => $programa->nombre
+                    ];
+                })
+                ->values(); // Asegurar que sea un array indexado, no un objeto
+
+            $datos = [
+                'programas' => $programas,
+                'modulos' => Modulo::select('modulo_id', 'nombre', 'credito', 'horas_academicas')
+                    ->orderBy('nombre')
+                    ->get()
+                    ->map(function($modulo) {
+                        return [
+                            'id' => $modulo->modulo_id, // Usar modulo_id como id para el frontend
+                            'modulo_id' => $modulo->modulo_id,
+                            'nombre' => $modulo->nombre,
+                            'credito' => $modulo->credito,
+                            'horas_academicas' => $modulo->horas_academicas
+                        ];
+                    })
+                    ->values(), // Asegurar que sea un array indexado
+                'docentes' => Docente::select('id', 'registro_docente', 'nombre', 'apellido', 'ci')
+                    ->orderBy('apellido')
+                    ->orderBy('nombre')
+                    ->get()
+                    ->map(function($docente) {
+                        return [
+                            'id' => $docente->id, // Usar id del docente (que viene de persona)
+                            'registro_docente' => $docente->registro_docente,
+                            'nombre_completo' => "{$docente->nombre} {$docente->apellido}",
+                            'ci' => $docente->ci
+                        ];
+                    })
+                    ->values(), // Asegurar que sea un array indexado
+                'horarios' => Horario::select('horario_id', 'dias', 'hora_ini', 'hora_fin')
+                    ->orderBy('dias')
+                    ->orderBy('hora_ini')
+                    ->get()
+                    ->map(function($horario) {
+                        // Usar los accessors del modelo si están disponibles
+                        $horaIni = $horario->hora_ini_formatted ?? null;
+                        $horaFin = $horario->hora_fin_formatted ?? null;
+
+                        // Fallback: formatear manualmente
+                        if (!$horaIni && $horario->hora_ini) {
+                            if (is_string($horario->hora_ini) && strpos($horario->hora_ini, 'T') !== false) {
+                                $horaIni = substr($horario->hora_ini, 11, 5);
+                            } elseif (is_string($horario->hora_ini)) {
+                                $horaIni = substr($horario->hora_ini, 0, 5);
+                            } elseif ($horario->hora_ini instanceof \DateTime || $horario->hora_ini instanceof \Carbon\Carbon) {
+                                $horaIni = $horario->hora_ini->format('H:i');
+                            }
+                        }
+
+                        if (!$horaFin && $horario->hora_fin) {
+                            if (is_string($horario->hora_fin) && strpos($horario->hora_fin, 'T') !== false) {
+                                $horaFin = substr($horario->hora_fin, 11, 5);
+                            } elseif (is_string($horario->hora_fin)) {
+                                $horaFin = substr($horario->hora_fin, 0, 5);
+                            } elseif ($horario->hora_fin instanceof \DateTime || $horario->hora_fin instanceof \Carbon\Carbon) {
+                                $horaFin = $horario->hora_fin->format('H:i');
+                            }
+                        }
+
+                        return [
+                            'id' => $horario->horario_id,
+                            'dias' => $horario->dias,
+                            'hora_ini' => $horaIni,
+                            'hora_ini_formatted' => $horaIni,
+                            'hora_fin' => $horaFin,
+                            'hora_fin_formatted' => $horaFin
+                        ];
+                    })
+                    ->values() // Asegurar que sea un array indexado
+            ];
+
+            // Log para depuración
+            Log::info('Datos del formulario enviados:', [
+                'programas_count' => is_array($datos['programas']) ? count($datos['programas']) : $datos['programas']->count(),
+                'modulos_count' => is_array($datos['modulos']) ? count($datos['modulos']) : $datos['modulos']->count(),
+                'docentes_count' => is_array($datos['docentes']) ? count($datos['docentes']) : $datos['docentes']->count(),
+                'horarios_count' => is_array($datos['horarios']) ? count($datos['horarios']) : $datos['horarios']->count(),
+                'programas_sample' => is_array($datos['programas']) ? array_slice($datos['programas'], 0, 2) : $datos['programas']->take(2)->toArray(),
+                'modulos_sample' => is_array($datos['modulos']) ? array_slice($datos['modulos'], 0, 2) : $datos['modulos']->take(2)->toArray(),
+                'docentes_sample' => is_array($datos['docentes']) ? array_slice($datos['docentes'], 0, 2) : $datos['docentes']->take(2)->toArray()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $datos,
+                'message' => 'Datos obtenidos exitosamente'
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al obtener estudiantes disponibles',
-                'error' => $e->getMessage()
-            ], 500);
+                'message' => 'Error al obtener datos: ' . (config('app.debug') ? $e->getMessage() : 'Error interno del servidor')
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
     }
 }

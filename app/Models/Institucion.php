@@ -11,7 +11,7 @@ class Institucion extends Model
 {
     protected $table = 'institucion';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre',
@@ -50,7 +50,7 @@ class Institucion extends Model
      */
     public function convenios(): BelongsToMany
     {
-        return $this->belongsToMany(Convenio::class, 'Institucion_convenio', 'institucion_id', 'convenio_id')
+        return $this->belongsToMany(Convenio::class, 'institucion_convenio', 'institucion_id', 'convenio_id')
                     ->withPivot(['porcentaje_participacion', 'monto_asignado', 'estado'])
                     ->withTimestamps();
     }

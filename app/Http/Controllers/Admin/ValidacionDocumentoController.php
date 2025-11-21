@@ -17,6 +17,16 @@ class ValidacionDocumentoController extends Controller
      *
      * @return \Illuminate\Http\JsonResponse
      */
+    public function listar(Request $request)
+    {
+        return $this->index($request);
+    }
+
+    /**
+     * Lista estudiantes con Estado_id=3 (documentos pendientes de validación)
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function index(Request $request)
     {
         try {
@@ -24,7 +34,7 @@ class ValidacionDocumentoController extends Controller
             $search = $request->input('search', '');
 
             $estudiantes = Estudiante::with(['documentos.tipoDocumento', 'estado'])
-                ->where('Estado_id', 3) // Estado: Documentos pendientes de validación
+                ->where('estado_id', 3) // Estado: Documentos pendientes de validación
                 ->when($search, function ($query) use ($search) {
                     $query->where(function ($q) use ($search) {
                         $q->where('nombre', 'ILIKE', "%{$search}%")
@@ -34,7 +44,7 @@ class ValidacionDocumentoController extends Controller
                     });
                 })
                 ->withCount(['documentos as documentos_pendientes' => function ($query) {
-                    $query->where('estado', 0); // 0 = pendiente
+                    $query->where('estado', '0'); // 0 = pendiente
                 }])
                 ->orderBy('created_at', 'desc')
                 ->paginate($perPage);
@@ -60,25 +70,36 @@ class ValidacionDocumentoController extends Controller
      * @param  int  $estudianteId
      * @return \Illuminate\Http\JsonResponse
      */
+    public function obtener($estudianteId)
+    {
+        return $this->show($estudianteId);
+    }
+
+    /**
+     * Ver documentos de un estudiante específico con detalle y versiones
+     *
+     * @param  int  $estudianteId
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function show($estudianteId)
     {
         try {
-            $estudiante = Estudiante::with([
-                'documentos' => function ($query) {
-                    $query->with(['tipoDocumento', 'convenio'])
-                          ->orderBy('Tipo_documento_id')
-                          ->orderBy('version', 'desc');
-                },
-                'estado'
-            ])->findOrFail($estudianteId);
+            $estudiante = Estudiante::with(['estado'])->findOrFail($estudianteId);
+
+            // Obtener documentos a través de la relación con Persona
+            $documentos = \App\Models\Documento::where('persona_id', $estudiante->id)
+                ->with(['tipoDocumento', 'convenio'])
+                ->orderBy('tipo_documento_id')
+                ->orderBy('version', 'desc')
+                ->get();
 
             // Agrupar documentos por tipo y listar versiones
-            $documentosAgrupados = $estudiante->documentos->groupBy('Tipo_documento_id')->map(function ($docs) {
+            $documentosAgrupados = $documentos->groupBy('tipo_documento_id')->map(function ($docs) {
                 return [
                     'tipo_documento' => $docs->first()->tipoDocumento,
                     'versiones' => $docs->map(function ($doc) {
                         return [
-                            'id' => $doc->id,
+                            'id' => $doc->documento_id,
                             'nombre' => $doc->nombre_documento,
                             'version' => $doc->version,
                             'path' => $doc->path_documento,
@@ -125,10 +146,10 @@ class ValidacionDocumentoController extends Controller
     {
         DB::beginTransaction();
         try {
-            $documento = Documento::with(['estudiante', 'tipoDocumento'])->findOrFail($documentoId);
+            $documento = Documento::with(['persona', 'tipoDocumento'])->findOrFail($documentoId);
 
             // Validar que el documento esté pendiente
-            if ($documento->estado != 0) {
+            if ($documento->estado != '0' && $documento->estado != 0) {
                 return response()->json([
                     'success' => false,
                     'message' => 'El documento ya ha sido procesado'
@@ -136,19 +157,24 @@ class ValidacionDocumentoController extends Controller
             }
 
             // Aprobar documento
-            $documento->estado = 1; // 1 = aprobado
+            $documento->estado = '1'; // 1 = aprobado
             $documento->observaciones = $request->input('observaciones', 'Documento aprobado');
             $documento->save();
 
             // Registrar en bitácora
-            $authUser = $request->auth_user;
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'Documentos',
-                'codTable' => $documento->id,
-                'transaccion' => "Documento '{$documento->tipoDocumento->nombre}' del estudiante {$documento->estudiante->nombre} {$documento->estudiante->apellido} (CI: {$documento->estudiante->ci}) fue APROBADO",
-                'Usuario_id' => $authUser->id
-            ]);
+            $authUser = $request->auth_user ?? auth('api')->user();
+            $persona = $documento->persona;
+            $estudiante = $persona ? \App\Models\Estudiante::find($persona->id) : null;
+            
+            if ($authUser && isset($authUser->usuario_id)) {
+                Bitacora::create([
+                    'fecha' => now()->toDateString(),
+                    'tabla' => 'documento',
+                    'codTabla' => $documento->documento_id,
+                    'transaccion' => "Documento '{$documento->tipoDocumento->nombre_entidad}' del estudiante " . ($estudiante ? "{$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" : ($persona ? "{$persona->nombre} {$persona->apellido} (CI: {$persona->ci})" : "ID: {$persona->id}")) . " fue APROBADO",
+                    'usuario_id' => $authUser->usuario_id
+                ]);
+            }
 
             DB::commit();
 
@@ -174,16 +200,27 @@ class ValidacionDocumentoController extends Controller
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
+    public function rechazar(Request $request)
+    {
+        return $this->reject($request);
+    }
+
+    /**
+     * Rechazar documento con motivo y crear nueva versión
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function reject(Request $request)
     {
         $request->validate([
-            'documento_id' => 'required|exists:Documentos,id',
+            'documento_id' => 'required|exists:documento,id',
             'motivo' => 'required|string|min:10|max:500'
         ]);
 
         DB::beginTransaction();
         try {
-            $documento = Documento::with(['estudiante', 'tipoDocumento'])->findOrFail($request->documento_id);
+            $documento = Documento::with(['persona', 'tipoDocumento'])->findOrFail($request->documento_id);
 
             // Validar que el documento esté pendiente
             if ($documento->estado != 0) {
@@ -194,32 +231,37 @@ class ValidacionDocumentoController extends Controller
             }
 
             // Rechazar documento actual
-            $documento->estado = 2; // 2 = rechazado
+            $documento->estado = '2'; // 2 = rechazado
             $documento->observaciones = $request->motivo;
             $documento->save();
 
             // Crear nueva versión (pendiente de subida por el estudiante)
-            $nuevaVersion = $documento->version + 1;
+            $nuevaVersion = (float)$documento->version + 1.0;
             $nuevoDocumento = Documento::create([
                 'nombre_documento' => $documento->nombre_documento,
-                'version' => $nuevaVersion,
+                'version' => (string)$nuevaVersion,
                 'path_documento' => null, // El estudiante deberá subir el archivo
-                'estado' => 0, // pendiente
+                'estado' => '0', // pendiente
                 'observaciones' => "Versión {$nuevaVersion} - Requerida por rechazo de versión anterior. Motivo: {$request->motivo}",
-                'Tipo_documento_id' => $documento->Tipo_documento_id,
-                'convenio_id' => $documento->convenio_id,
-                'estudiante_id' => $documento->estudiante_id
+                'tipo_documento_id' => $documento->tipo_documento_id,
+                'persona_id' => $documento->persona_id,
+                'convenio_id' => $documento->convenio_id
             ]);
 
             // Registrar en bitácora
-            $authUser = $request->auth_user;
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'Documentos',
-                'codTable' => $documento->id,
-                'transaccion' => "Documento '{$documento->tipoDocumento->nombre}' del estudiante {$documento->estudiante->nombre} {$documento->estudiante->apellido} (CI: {$documento->estudiante->ci}) fue RECHAZADO. Motivo: {$request->motivo}. Nueva versión {$nuevaVersion} creada.",
-                'Usuario_id' => $authUser->id
-            ]);
+            $authUser = $request->auth_user ?? auth('api')->user();
+            $persona = $documento->persona;
+            $estudiante = $persona ? \App\Models\Estudiante::find($persona->id) : null;
+
+            if ($authUser && isset($authUser->usuario_id)) {
+                Bitacora::create([
+                    'fecha' => now()->toDateString(),
+                    'tabla' => 'Documento',
+                    'codTabla' => $documento->documento_id,
+                    'transaccion' => "Documento '{$documento->tipoDocumento->nombre_entidad}' del estudiante " . ($estudiante ? "{$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" : ($persona ? "{$persona->nombre} {$persona->apellido} (CI: {$persona->ci})" : "ID: {$persona->id}")) . " fue RECHAZADO. Motivo: {$request->motivo}. Nueva versión {$nuevaVersion} creada.",
+                    'usuario_id' => $authUser->usuario_id
+                ]);
+            }
 
             DB::commit();
 
@@ -248,6 +290,17 @@ class ValidacionDocumentoController extends Controller
      * @param  int  $estudianteId
      * @return \Illuminate\Http\JsonResponse
      */
+    public function aprobarTodos(Request $request, $estudianteId)
+    {
+        return $this->approveAll($request, $estudianteId);
+    }
+
+    /**
+     * Aprobar todos los documentos de un estudiante y cambiar su estado a 4
+     *
+     * @param  int  $estudianteId
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function approveAll(Request $request, $estudianteId)
     {
         DB::beginTransaction();
@@ -255,7 +308,7 @@ class ValidacionDocumentoController extends Controller
             $estudiante = Estudiante::with('documentos')->findOrFail($estudianteId);
 
             // Validar que el estudiante esté en estado 3 (documentos pendientes)
-            if ($estudiante->Estado_id != 3) {
+            if ($estudiante->estado_id != 3) {
                 return response()->json([
                     'success' => false,
                     'message' => 'El estudiante no está en estado de documentos pendientes'
@@ -263,10 +316,10 @@ class ValidacionDocumentoController extends Controller
             }
 
             // Obtener documentos pendientes (última versión de cada tipo)
-            $documentosPendientes = $estudiante->documentos()
-                ->where('estado', 0)
+            $documentosPendientes = \App\Models\Documento::where('persona_id', $estudiante->id)
+                ->where('estado', '0')
                 ->get()
-                ->groupBy('Tipo_documento_id')
+                ->groupBy('tipo_documento_id')
                 ->map(function ($docs) {
                     return $docs->sortByDesc('version')->first();
                 });
@@ -281,25 +334,28 @@ class ValidacionDocumentoController extends Controller
             // Aprobar todos los documentos pendientes
             $documentosAprobados = [];
             foreach ($documentosPendientes as $documento) {
-                $documento->estado = 1; // aprobado
+                $documento->estado = '1'; // aprobado
                 $documento->observaciones = 'Aprobado en validación masiva';
                 $documento->save();
                 $documentosAprobados[] = $documento;
             }
 
             // Cambiar estado del estudiante a 4 (Documentos aprobados / Apto para inscripción)
-            $estudiante->Estado_id = 4;
+            $estudiante->estado_id = 4;
             $estudiante->save();
 
             // Registrar en bitácora
-            $authUser = $request->auth_user;
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'Estudiante',
-                'codTable' => $estudiante->id,
-                'transaccion' => "Todos los documentos del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) fueron APROBADOS. Estado cambiado a 'Apto para inscripción' (Estado_id=4). Total documentos aprobados: " . count($documentosAprobados),
-                'Usuario_id' => $authUser->id
-            ]);
+            $authUser = $request->auth_user ?? auth('api')->user();
+
+            if ($authUser && isset($authUser->usuario_id)) {
+                Bitacora::create([
+                    'fecha' => now()->toDateString(),
+                    'tabla' => 'Estudiante',
+                    'codTabla' => $estudiante->id,
+                    'transaccion' => "Todos los documentos del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) fueron APROBADOS. Estado cambiado a 'Apto para inscripción' (Estado_id=4). Total documentos aprobados: " . count($documentosAprobados),
+                    'usuario_id' => $authUser->usuario_id
+                ]);
+            }
 
             DB::commit();
 

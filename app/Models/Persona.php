@@ -9,21 +9,24 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class Persona extends Model
 {
     protected $table = 'persona';
-    protected $primaryKey = 'persona_id';
-    public $timestamps = false;
+    protected $primaryKey = 'id';
+    public $timestamps = true;
 
     protected $fillable = [
         'ci',
         'nombre',
         'apellido',
         'celular',
+        'sexo',
         'fecha_nacimiento',
         'direccion',
-        'fotografia'
+        'fotografia',
+        'usuario_id'
     ];
 
     protected $casts = [
-        'persona_id' => 'integer',
+        'id' => 'integer',
+        'usuario_id' => 'integer',
         'fecha_nacimiento' => 'date'
     ];
 
@@ -33,7 +36,7 @@ class Persona extends Model
      */
     public function usuario(): HasOne
     {
-        return $this->hasOne(Usuario::class, 'persona_id', 'persona_id');
+        return $this->hasOne(Usuario::class, 'persona_id', 'id');
     }
 
     /**
@@ -42,7 +45,7 @@ class Persona extends Model
      */
     public function documentos(): HasMany
     {
-        return $this->hasMany(Documento::class, 'persona_id', 'persona_id');
+        return $this->hasMany(Documento::class, 'persona_id', 'id');
     }
 
     /**

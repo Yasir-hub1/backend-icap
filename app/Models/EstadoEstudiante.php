@@ -8,20 +8,21 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class EstadoEstudiante extends Model
 {
     protected $table = 'estado_estudiante';
-    protected $primaryKey = 'estado_id';
-    public $timestamps = false;
+    protected $primaryKey = 'id';
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre_estado'
     ];
 
     /**
-     * Relación con estudiantes en grupo_estudiante
+     * Relación con estudiantes
      */
-    public function estudiantesEnGrupo(): HasMany
+    public function estudiantes(): HasMany
     {
-        return $this->hasMany(GrupoEstudiante::class, 'estado', 'estado_id');
+        return $this->hasMany(Estudiante::class, 'estado_id', 'id');
     }
+
 
     /**
      * Scope para buscar por nombre

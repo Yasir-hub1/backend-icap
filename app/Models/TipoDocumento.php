@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class TipoDocumento extends Model
 {
     protected $table = 'tipo_documento';
-    protected $primaryKey = 'Tipo_documento_id';
-    public $timestamps = false;
+    protected $primaryKey = 'tipo_documento_id';
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre_entidad'
@@ -20,7 +20,7 @@ class TipoDocumento extends Model
      */
     public function documentos(): HasMany
     {
-        return $this->hasMany(Documento::class, 'tipo_documento', 'Tipo_documento_id');
+        return $this->hasMany(Documento::class, 'tipo_documento_id', 'tipo_documento_id');
     }
 
     /**

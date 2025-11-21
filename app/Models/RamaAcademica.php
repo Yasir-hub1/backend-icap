@@ -9,7 +9,7 @@ class RamaAcademica extends Model
 {
     protected $table = 'rama_academica';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre'

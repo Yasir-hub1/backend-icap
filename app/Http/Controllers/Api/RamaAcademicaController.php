@@ -49,7 +49,7 @@ class RamaAcademicaController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'nombre' => 'required|string|max:150|unique:Rama_academica,nombre'
+            'nombre' => 'required|string|max:150|unique:rama_academica,nombre'
         ]);
 
         $rama = RamaAcademica::create($request->validated());
@@ -71,7 +71,7 @@ class RamaAcademicaController extends Controller
         $rama = RamaAcademica::findOrFail($id);
 
         $request->validate([
-            'nombre' => 'required|string|max:150|unique:Rama_academica,nombre,' . $id
+            'nombre' => 'required|string|max:150|unique:rama_academica,nombre,' . $id
         ]);
 
         $rama->update($request->validated());

@@ -7,9 +7,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Documento extends Model
 {
-    protected $table = 'documentos';
+    protected $table = 'documento';
     protected $primaryKey = 'documento_id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre_documento',
@@ -17,14 +17,14 @@ class Documento extends Model
         'path_documento',
         'estado',
         'observaciones',
-        'tipo_documento',
+        'tipo_documento_id',
         'persona_id',
         'convenio_id'
     ];
 
     protected $casts = [
         'documento_id' => 'integer',
-        'tipo_documento' => 'integer',
+        'tipo_documento_id' => 'integer',
         'persona_id' => 'integer',
         'convenio_id' => 'integer'
     ];
@@ -34,7 +34,7 @@ class Documento extends Model
      */
     public function tipoDocumento(): BelongsTo
     {
-        return $this->belongsTo(TipoDocumento::class, 'tipo_documento', 'Tipo_documento_id');
+        return $this->belongsTo(TipoDocumento::class, 'tipo_documento_id', 'tipo_documento_id');
     }
 
     /**
@@ -50,7 +50,7 @@ class Documento extends Model
      */
     public function persona(): BelongsTo
     {
-        return $this->belongsTo(Persona::class, 'persona_id', 'persona_id');
+        return $this->belongsTo(Persona::class, 'persona_id', 'id');
     }
 
     /**
@@ -74,7 +74,7 @@ class Documento extends Model
      */
     public function scopePorTipo($query, int $tipoId)
     {
-        return $query->where('tipo_documento', $tipoId);
+        return $query->where('tipo_documento_id', $tipoId);
     }
 
     /**

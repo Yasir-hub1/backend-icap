@@ -12,6 +12,16 @@ use Illuminate\Support\Facades\DB;
 class ProgramaController extends Controller
 {
     /**
+     * Listado de programas activos con convenios vigentes aplicables al estudiante (alias para listar)
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function listar(Request $request)
+    {
+        return $this->index($request);
+    }
+
+    /**
      * Listado de programas activos con convenios vigentes aplicables al estudiante
      *
      * @return \Illuminate\Http\JsonResponse
@@ -89,6 +99,17 @@ class ProgramaController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Detalle de un programa con módulos, horarios, docentes y costo total (alias para obtener)
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function obtener(Request $request, $id)
+    {
+        return $this->show($request, $id);
     }
 
     /**

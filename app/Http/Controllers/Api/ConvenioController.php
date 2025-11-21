@@ -133,7 +133,7 @@ class ConvenioController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'numero_convenio' => 'required|string|max:50|unique:Convenio,numero_convenio',
+            'numero_convenio' => 'required|string|max:50|unique:convenio,numero_convenio',
             'objeto_convenio' => 'required|string',
             'fecha_ini' => 'required|date',
             'fecha_fin' => 'required|date|after:fecha_ini',
@@ -141,9 +141,9 @@ class ConvenioController extends Controller
             'moneda' => 'nullable|string|max:10',
             'observaciones' => 'nullable|string',
             'estado' => 'required|integer|in:0,1',
-            'Tipo_convenio_id' => 'required|exists:Tipo_convenio,id',
+            'Tipo_convenio_id' => 'required|exists:tipo_convenio,id',
             'instituciones' => 'required|array|min:1',
-            'instituciones.*.id' => 'required|exists:Institucion,id',
+            'instituciones.*.id' => 'required|exists:institucion,id',
             'instituciones.*.porcentaje_participacion' => 'nullable|numeric|min:0|max:100',
             'instituciones.*.monto_asignado' => 'nullable|numeric|min:0'
         ]);
@@ -192,7 +192,7 @@ class ConvenioController extends Controller
         $convenio = Convenio::findOrFail($id);
 
         $request->validate([
-            'numero_convenio' => 'required|string|max:50|unique:Convenio,numero_convenio,' . $id,
+            'numero_convenio' => 'required|string|max:50|unique:convenio,numero_convenio,' . $id,
             'objeto_convenio' => 'required|string',
             'fecha_ini' => 'required|date',
             'fecha_fin' => 'required|date|after:fecha_ini',
@@ -200,7 +200,7 @@ class ConvenioController extends Controller
             'moneda' => 'nullable|string|max:10',
             'observaciones' => 'nullable|string',
             'estado' => 'required|integer|in:0,1',
-            'Tipo_convenio_id' => 'required|exists:Tipo_convenio,id'
+            'Tipo_convenio_id' => 'required|exists:tipo_convenio,id'
         ]);
 
         $convenio->update($request->validated());
@@ -264,7 +264,7 @@ class ConvenioController extends Controller
         $convenio = Convenio::findOrFail($id);
 
         $request->validate([
-            'institucion_id' => 'required|exists:Institucion,id',
+            'institucion_id' => 'required|exists:institucion,id',
             'porcentaje_participacion' => 'nullable|numeric|min:0|max:100',
             'monto_asignado' => 'nullable|numeric|min:0'
         ]);

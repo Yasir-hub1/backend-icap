@@ -56,7 +56,7 @@ class ProvinciaController extends Controller
         $request->validate([
             'nombre_provincia' => 'required|string|max:100',
             'codigo_provincia' => 'nullable|string|max:10',
-            'Pais_id' => 'required|exists:Pais,id'
+            'Pais_id' => 'required|exists:pais,id'
         ]);
 
         $provincia = Provincia::create($request->validated());
@@ -78,7 +78,7 @@ class ProvinciaController extends Controller
         $request->validate([
             'nombre_provincia' => 'required|string|max:100',
             'codigo_provincia' => 'nullable|string|max:10',
-            'Pais_id' => 'required|exists:Pais,id'
+            'Pais_id' => 'required|exists:pais,id'
         ]);
 
         $provincia->update($request->validated());

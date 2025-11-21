@@ -9,6 +9,14 @@ use Illuminate\Http\Request;
 class GrupoController extends Controller
 {
     /**
+     * Mis grupos asignados como docente (alias para listar)
+     */
+    public function listar(Request $request)
+    {
+        return $this->index($request);
+    }
+
+    /**
      * Mis grupos asignados como docente
      */
     public function index(Request $request)
@@ -59,6 +67,14 @@ class GrupoController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Ver estudiantes del grupo con sus notas actuales (alias para obtener)
+     */
+    public function obtener(Request $request, $grupoId)
+    {
+        return $this->show($request, $grupoId);
     }
 
     /**

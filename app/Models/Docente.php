@@ -14,9 +14,21 @@ class Docente extends Persona implements AuthenticatableContract, JWTSubject
     use Authenticatable;
     protected $table = 'docente';
     protected $primaryKey = 'registro_docente';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
+        // Campos heredados de Persona
+        'id',
+        'ci',
+        'nombre',
+        'apellido',
+        'celular',
+        'sexo',
+        'fecha_nacimiento',
+        'direccion',
+        'fotografia',
+        'usuario_id',
+        // Campos propios de Docente
         'registro_docente',
         'cargo',
         'area_de_especializacion',
@@ -24,7 +36,9 @@ class Docente extends Persona implements AuthenticatableContract, JWTSubject
     ];
 
     protected $casts = [
-        'registro_docente' => 'integer'
+        'id' => 'integer',
+        'usuario_id' => 'integer',
+        'fecha_nacimiento' => 'date'
     ];
 
     /**
@@ -32,7 +46,7 @@ class Docente extends Persona implements AuthenticatableContract, JWTSubject
      */
     public function grupos(): HasMany
     {
-        return $this->hasMany(Grupo::class, 'registro_docente', 'registro_docente');
+        return $this->hasMany(Grupo::class, 'docente_id', 'id');
     }
 
     /**
@@ -40,7 +54,7 @@ class Docente extends Persona implements AuthenticatableContract, JWTSubject
      */
     public function programas(): BelongsToMany
     {
-        return $this->belongsToMany(Programa::class, 'Grupo', 'registro_docente', 'id')
+        return $this->belongsToMany(Programa::class, 'grupo', 'docente_id', 'id')
                     ->distinct();
     }
 

@@ -10,18 +10,18 @@ class Cuota extends Model
 {
     protected $table = 'cuotas';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'fecha_ini',
         'fecha_fin',
         'monto',
-        'plan_pagos_id'
+        'plan_pago_id'
     ];
 
     protected $casts = [
         'id' => 'integer',
-        'plan_pagos_id' => 'integer',
+        'plan_pago_id' => 'integer',
         'fecha_ini' => 'date',
         'fecha_fin' => 'date',
         'monto' => 'decimal:2'
@@ -30,9 +30,9 @@ class Cuota extends Model
     /**
      * Relación con plan de pagos
      */
-    public function planPagos(): BelongsTo
+    public function planPago(): BelongsTo
     {
-        return $this->belongsTo(PlanPagos::class, 'plan_pagos_id', 'id');
+        return $this->belongsTo(PlanPagos::class, 'plan_pago_id', 'id');
     }
 
     /**

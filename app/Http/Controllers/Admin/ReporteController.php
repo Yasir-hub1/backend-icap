@@ -3,334 +3,599 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Convenio;
+use App\Models\Programa;
 use App\Models\Estudiante;
 use App\Models\Inscripcion;
 use App\Models\Pago;
-use App\Models\Grupo;
+use App\Models\Bitacora;
+use App\Models\Usuario;
+use App\Models\Institucion;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class ReporteController extends Controller
 {
     /**
-     * Reporte de estudiantes con filtros
+     * Reporte de convenios activos
      */
-    public function students(Request $request)
+    public function conveniosActivos(Request $request): JsonResponse
     {
         try {
-            $estadoId = $request->input('estado_id');
-            $fechaInicio = $request->input('fecha_inicio');
-            $fechaFin = $request->input('fecha_fin');
+            $fechaDesde = $request->get('fecha_desde');
+            $fechaHasta = $request->get('fecha_hasta');
+            $tipoConvenioId = $request->get('tipo_convenio_id');
 
-            $query = Estudiante::with('estado');
+            $query = Convenio::with(['tipoConvenio', 'instituciones'])
+                ->activos(); // Usa el scope que filtra por fecha_fin >= now()
 
-            if ($estadoId) {
-                $query->where('Estado_id', $estadoId);
+            if ($fechaDesde) {
+                $query->where('fecha_ini', '>=', $fechaDesde);
             }
 
-            if ($fechaInicio && $fechaFin) {
-                $query->whereBetween('created_at', [$fechaInicio, $fechaFin]);
+            if ($fechaHasta) {
+                $query->where('fecha_fin', '<=', $fechaHasta);
             }
 
-            $estudiantes = $query->orderBy('created_at', 'desc')
-                ->get()
-                ->map(function ($estudiante) {
+            if ($tipoConvenioId) {
+                $query->where('tipo_convenio_id', $tipoConvenioId);
+            }
+
+            $convenios = $query->orderBy('fecha_ini', 'desc')->get();
+
+            $estadisticas = [
+                'total_convenios' => $convenios->count(),
+                'convenios_por_tipo' => $convenios->groupBy('tipo_convenio_id')->map(function ($group) {
                     return [
-                        'id' => $estudiante->id,
-                        'registro' => $estudiante->registro_estudiante,
-                        'nombre_completo' => $estudiante->nombre . ' ' . $estudiante->apellido,
-                        'ci' => $estudiante->ci,
-                        'celular' => $estudiante->celular,
-                        'estado' => $estudiante->estado->nombre_estado ?? '',
-                        'fecha_registro' => $estudiante->created_at,
-                        'total_inscripciones' => $estudiante->inscripciones()->count()
+                        'tipo' => $group->first()->tipoConvenio->nombre_tipo ?? 'N/A',
+                        'cantidad' => $group->count()
                     ];
-                });
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Reporte de estudiantes generado exitosamente',
-                'data' => [
-                    'estudiantes' => $estudiantes,
-                    'total' => $estudiantes->count(),
-                    'resumen' => [
-                        'total_registros' => $estudiantes->count()
-                    ]
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al generar reporte de estudiantes',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Reporte de pagos con totales
-     */
-    public function payments(Request $request)
-    {
-        try {
-            $fechaInicio = $request->input('fecha_inicio', now()->startOfMonth());
-            $fechaFin = $request->input('fecha_fin', now()->endOfMonth());
-            $metodo = $request->input('metodo');
-            $verificado = $request->input('verificado');
-
-            $query = Pago::with([
-                    'cuota.planPagos.inscripcion.estudiante',
-                    'cuota.planPagos.inscripcion.programa'
-                ])
-                ->whereBetween('fecha', [$fechaInicio, $fechaFin]);
-
-            if ($metodo) {
-                $query->where('metodo', $metodo);
-            }
-
-            if ($verificado !== null) {
-                $query->where('verificado', $verificado);
-            }
-
-            $pagos = $query->orderBy('fecha', 'desc')
-                ->get()
-                ->map(function ($pago) {
-                    $estudiante = $pago->cuota->planPagos->inscripcion->estudiante;
-                    $programa = $pago->cuota->planPagos->inscripcion->programa;
-
-                    return [
-                        'id' => $pago->id,
-                        'fecha' => $pago->fecha,
-                        'estudiante' => $estudiante->nombre . ' ' . $estudiante->apellido,
-                        'ci' => $estudiante->ci,
-                        'programa' => $programa->nombre,
-                        'monto' => $pago->monto,
-                        'metodo' => $pago->metodo,
-                        'verificado' => $pago->verificado,
-                        'fecha_verificacion' => $pago->fecha_verificacion
-                    ];
-                });
-
-            $totalMonto = $pagos->sum('monto');
-            $porMetodo = [
-                'QR' => $pagos->where('metodo', 'QR')->sum('monto'),
-                'TRANSFERENCIA' => $pagos->where('metodo', 'TRANSFERENCIA')->sum('monto'),
-                'EFECTIVO' => $pagos->where('metodo', 'EFECTIVO')->sum('monto')
+                })->values(),
+                'instituciones_participantes' => $convenios->flatMap(function ($convenio) {
+                    return $convenio->instituciones;
+                })->unique('id')->count(),
+                'monto_total_convenios' => $convenios->sum(function ($convenio) {
+                    return $convenio->instituciones->sum(function ($inst) {
+                        return $inst->pivot->monto_asignado ?? 0;
+                    });
+                })
             ];
 
             return response()->json([
                 'success' => true,
-                'message' => 'Reporte de pagos generado exitosamente',
                 'data' => [
-                    'pagos' => $pagos,
-                    'total_pagos' => $pagos->count(),
-                    'resumen' => [
-                        'monto_total' => $totalMonto,
-                        'monto_verificado' => $pagos->where('verificado', true)->sum('monto'),
-                        'monto_pendiente' => $pagos->where('verificado', false)->sum('monto'),
-                        'por_metodo' => $porMetodo
-                    ]
-                ]
-            ], 200);
+                    'convenios' => $convenios->map(function ($convenio) {
+                        $montoTotal = $convenio->instituciones->sum(function ($inst) {
+                            return $inst->pivot->monto_asignado ?? 0;
+                        });
+                        $estado = $convenio->fecha_fin && $convenio->fecha_fin >= now()->toDateString() ? 'activo' : 'vencido';
 
+                        return [
+                            'id' => $convenio->convenio_id,
+                            'numero_convenio' => $convenio->numero_convenio,
+                            'tipo' => $convenio->tipoConvenio->nombre_tipo ?? 'N/A',
+                            'fecha_inicio' => $convenio->fecha_ini,
+                            'fecha_fin' => $convenio->fecha_fin,
+                            'monto_total' => $montoTotal,
+                            'estado' => $estado,
+                            'instituciones' => $convenio->instituciones->map(function ($inst) {
+                                return [
+                                    'id' => $inst->id,
+                                    'nombre' => $inst->nombre,
+                                    'porcentaje' => $inst->pivot->porcentaje_participacion ?? 0
+                                ];
+                            })
+                        ];
+                    }),
+                    'estadisticas' => $estadisticas
+                ],
+                'message' => 'Reporte de convenios activos generado exitosamente'
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al generar reporte de pagos',
-                'error' => $e->getMessage()
+                'message' => 'Error al generar reporte: ' . $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Reporte de inscripciones por programa
+     * Reporte de programas ofrecidos
      */
-    public function enrollments(Request $request)
+    public function programasOfrecidos(Request $request): JsonResponse
     {
         try {
-            $programaId = $request->input('programa_id');
-            $fechaInicio = $request->input('fecha_inicio');
-            $fechaFin = $request->input('fecha_fin');
+            $ramaAcademicaId = $request->get('rama_academica_id');
+            $tipoProgramaId = $request->get('tipo_programa_id');
+            $institucionId = $request->get('institucion_id');
+            $estado = $request->get('estado', 'activo');
 
-            $query = Inscripcion::with(['estudiante', 'programa', 'descuento']);
+            $query = Programa::with(['ramaAcademica', 'tipoPrograma', 'institucion', 'grupos']);
+
+            if ($ramaAcademicaId) {
+                $query->where('rama_academica_id', $ramaAcademicaId);
+            }
+
+            if ($tipoProgramaId) {
+                $query->where('tipo_programa_id', $tipoProgramaId);
+            }
+
+            if ($institucionId) {
+                $query->where('institucion_id', $institucionId);
+            }
+
+            if ($estado === 'activo') {
+                $query->whereHas('institucion', function ($q) {
+                    $q->where('estado', 'activo');
+                });
+            }
+
+            $programas = $query->orderBy('nombre')->get();
+
+            $estadisticas = [
+                'total_programas' => $programas->count(),
+                'programas_por_rama' => $programas->groupBy('rama_academica_id')->map(function ($group) {
+                    return [
+                        'rama' => $group->first()->ramaAcademica->nombre ?? 'N/A',
+                        'cantidad' => $group->count()
+                    ];
+                })->values(),
+                'programas_por_tipo' => $programas->groupBy('tipo_programa_id')->map(function ($group) {
+                    return [
+                        'tipo' => $group->first()->tipoPrograma->nombre ?? 'N/A',
+                        'cantidad' => $group->count()
+                    ];
+                })->values(),
+                'total_inscripciones' => Inscripcion::whereIn('programa_id', $programas->pluck('id'))->count(),
+                'total_grupos_activos' => $programas->sum(function ($programa) {
+                    return $programa->grupos->where('fecha_fin', '>=', now())->count();
+                })
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'programas' => $programas->map(function ($programa) {
+                        return [
+                            'id' => $programa->id,
+                            'nombre' => $programa->nombre,
+                            'rama_academica' => $programa->ramaAcademica->nombre ?? 'N/A',
+                            'tipo_programa' => $programa->tipoPrograma->nombre ?? 'N/A',
+                            'institucion' => $programa->institucion->nombre ?? 'N/A',
+                            'costo' => $programa->costo,
+                            'duracion_meses' => $programa->duracion_meses,
+                            'total_inscripciones' => Inscripcion::where('programa_id', $programa->id)->count(),
+                            'grupos_activos' => $programa->grupos->where('fecha_fin', '>=', now())->count(),
+                            'grupos_total' => $programa->grupos->count()
+                        ];
+                    }),
+                    'estadisticas' => $estadisticas
+                ],
+                'message' => 'Reporte de programas ofrecidos generado exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al generar reporte: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reporte de estado académico de estudiantes
+     */
+    public function estadoAcademicoEstudiantes(Request $request): JsonResponse
+    {
+        try {
+            $programaId = $request->get('programa_id');
+            $estadoId = $request->get('estado_id');
+            $fechaDesde = $request->get('fecha_desde');
+            $fechaHasta = $request->get('fecha_hasta');
+
+            $query = Estudiante::with(['estadoEstudiante', 'inscripciones.programa', 'grupos']);
+
+            if ($estadoId) {
+                $query->where('estado_id', $estadoId);
+            }
+
+            if ($fechaDesde) {
+                $query->whereHas('inscripciones', function ($q) use ($fechaDesde) {
+                    $q->where('fecha', '>=', $fechaDesde);
+                });
+            }
+
+            if ($fechaHasta) {
+                $query->whereHas('inscripciones', function ($q) use ($fechaHasta) {
+                    $q->where('fecha', '<=', $fechaHasta);
+                });
+            }
+
+            $estudiantes = $query->get();
 
             if ($programaId) {
-                $query->where('Programa_id', $programaId);
-            }
-
-            if ($fechaInicio && $fechaFin) {
-                $query->whereBetween('fecha', [$fechaInicio, $fechaFin]);
-            }
-
-            $inscripciones = $query->orderBy('fecha', 'desc')
-                ->get()
-                ->map(function ($inscripcion) {
-                    return [
-                        'id' => $inscripcion->id,
-                        'fecha' => $inscripcion->fecha,
-                        'estudiante' => $inscripcion->estudiante->nombre . ' ' . $inscripcion->estudiante->apellido,
-                        'ci' => $inscripcion->estudiante->ci,
-                        'registro' => $inscripcion->estudiante->registro_estudiante,
-                        'programa' => $inscripcion->programa->nombre,
-                        'costo_base' => $inscripcion->programa->costo,
-                        'descuento' => $inscripcion->descuento ? $inscripcion->descuento->descuento . '%' : '0%',
-                        'costo_final' => $inscripcion->costo_final
-                    ];
+                $estudiantes = $estudiantes->filter(function ($estudiante) use ($programaId) {
+                    return $estudiante->inscripciones->contains(function ($inscripcion) use ($programaId) {
+                        return $inscripcion->programa_id == $programaId;
+                    });
                 });
+            }
 
-            $porPrograma = $inscripciones->groupBy('programa')->map(function ($items, $programa) {
+            // Obtener datos de rendimiento académico
+            $estudiantesConRendimiento = $estudiantes->map(function ($estudiante) {
+                $grupos = $estudiante->grupos;
+                $totalGrupos = $grupos->count();
+                $aprobados = $grupos->filter(function ($grupo) {
+                    return $grupo->pivot->estado === 'APROBADO';
+                })->count();
+                $reprobados = $grupos->filter(function ($grupo) {
+                    return $grupo->pivot->estado === 'REPROBADO';
+                })->count();
+                $promedioNotas = $grupos->whereNotNull('pivot.nota')->avg('pivot.nota');
+
                 return [
-                    'programa' => $programa,
-                    'total_inscripciones' => $items->count(),
-                    'monto_total' => $items->sum('costo_final')
+                    'registro_estudiante' => $estudiante->registro_estudiante,
+                    'nombre' => $estudiante->nombre,
+                    'apellido' => $estudiante->apellido,
+                    'ci' => $estudiante->ci,
+                    'estado' => $estudiante->estadoEstudiante->nombre_estado ?? 'N/A',
+                    'total_inscripciones' => $estudiante->inscripciones->count(),
+                    'programas' => $estudiante->inscripciones->map(function ($inscripcion) {
+                        return $inscripcion->programa->nombre ?? 'N/A';
+                    })->unique()->values(),
+                    'rendimiento' => [
+                        'total_grupos' => $totalGrupos,
+                        'aprobados' => $aprobados,
+                        'reprobados' => $reprobados,
+                        'promedio_notas' => $promedioNotas ? round($promedioNotas, 2) : null,
+                        'tasa_aprobacion' => $totalGrupos > 0 ? round(($aprobados / $totalGrupos) * 100, 2) : 0
+                    ]
+                ];
+            });
+
+            $estadisticas = [
+                'total_estudiantes' => $estudiantes->count(),
+                'estudiantes_por_estado' => $estudiantes->groupBy('estado_id')->map(function ($group) {
+                    return [
+                        'estado' => $group->first()->estadoEstudiante->nombre_estado ?? 'N/A',
+                        'cantidad' => $group->count()
+                    ];
+                })->values(),
+                'total_inscripciones' => $estudiantes->sum(function ($e) {
+                    return $e->inscripciones->count();
+                }),
+                'promedio_aprobacion' => $estudiantesConRendimiento->filter(function ($e) {
+                    return $e['rendimiento']['total_grupos'] > 0;
+                })->avg('rendimiento.tasa_aprobacion')
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'estudiantes' => $estudiantesConRendimiento->values(),
+                    'estadisticas' => $estadisticas
+                ],
+                'message' => 'Reporte de estado académico generado exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al generar reporte: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reporte de movimientos financieros
+     */
+    public function movimientosFinancieros(Request $request): JsonResponse
+    {
+        try {
+            $fechaDesde = $request->get('fecha_desde', now()->startOfMonth()->toDateString());
+            $fechaHasta = $request->get('fecha_hasta', now()->toDateString());
+            $tipoMovimiento = $request->get('tipo_movimiento'); // 'ingresos', 'egresos', 'todos'
+
+            // Obtener pagos en el rango de fechas
+            $pagos = Pago::with(['cuota.planPago.inscripcion.estudiante', 'cuota.planPago.inscripcion.programa'])
+                ->whereBetween('fecha', [$fechaDesde, $fechaHasta])
+                ->orderBy('fecha', 'desc')
+                ->get();
+
+            // Obtener planes de pago creados
+            $planesPago = DB::table('plan_pago')
+                ->whereBetween('created_at', [$fechaDesde, $fechaHasta])
+                ->get();
+
+            // Obtener descuentos aplicados
+            $descuentos = DB::table('descuento')
+                ->whereBetween('created_at', [$fechaDesde, $fechaHasta])
+                ->get();
+
+            $ingresos = $pagos->where('verificado', true)->sum('monto');
+            $ingresosPendientes = $pagos->where('verificado', false)->sum('monto');
+            $totalIngresos = $pagos->sum('monto');
+
+            $estadisticas = [
+                'periodo' => [
+                    'fecha_desde' => $fechaDesde,
+                    'fecha_hasta' => $fechaHasta
+                ],
+                'ingresos' => [
+                    'total_verificado' => $ingresos,
+                    'total_pendiente' => $ingresosPendientes,
+                    'total' => $totalIngresos,
+                    'cantidad_pagos' => $pagos->count(),
+                    'cantidad_pagos_verificados' => $pagos->where('verificado', true)->count(),
+                    'promedio_pago' => $pagos->count() > 0 ? round($pagos->avg('monto'), 2) : 0
+                ],
+                'planes_pago' => [
+                    'total_creados' => $planesPago->count(),
+                    'monto_total' => $planesPago->sum('monto_total')
+                ],
+                'descuentos' => [
+                    'total_aplicados' => $descuentos->count(),
+                    'monto_descontado' => $descuentos->sum('descuento')
+                ],
+                'movimientos_por_dia' => $pagos->groupBy(function ($pago) {
+                    return Carbon::parse($pago->fecha)->format('Y-m-d');
+                })->map(function ($group, $fecha) {
+                    return [
+                        'fecha' => $fecha,
+                        'cantidad' => $group->count(),
+                        'monto_total' => $group->sum('monto'),
+                        'monto_verificado' => $group->where('verificado', true)->sum('monto')
+                    ];
+                })->values()
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'pagos' => $pagos->map(function ($pago) {
+                        return [
+                            'id' => $pago->id,
+                            'fecha' => $pago->fecha,
+                            'monto' => $pago->monto,
+                            'verificado' => $pago->verificado,
+                            'estudiante' => ($pago->cuota->planPago->inscripcion->estudiante->nombre ?? '') . ' ' . ($pago->cuota->planPago->inscripcion->estudiante->apellido ?? ''),
+                            'programa' => $pago->cuota->planPago->inscripcion->programa->nombre ?? 'N/A',
+                            'token' => $pago->token
+                        ];
+                    }),
+                    'estadisticas' => $estadisticas
+                ],
+                'message' => 'Reporte de movimientos financieros generado exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al generar reporte: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reporte de actividad por usuario
+     */
+    public function actividadPorUsuario(Request $request): JsonResponse
+    {
+        try {
+            $usuarioId = $request->get('usuario_id');
+            $fechaDesde = $request->get('fecha_desde', now()->subDays(30)->toDateString());
+            $fechaHasta = $request->get('fecha_hasta', now()->toDateString());
+
+            $query = Bitacora::with(['usuario.persona'])
+                ->whereBetween('fecha', [$fechaDesde, $fechaHasta]);
+
+            if ($usuarioId) {
+                $query->where('usuario_id', $usuarioId);
+            }
+
+            $registros = $query->orderBy('fecha', 'desc')->orderBy('created_at', 'desc')->get();
+
+            $actividadPorUsuario = $registros->groupBy('usuario_id')->map(function ($group, $userId) {
+                $usuario = $group->first()->usuario;
+                $persona = $usuario ? $usuario->persona : null;
+                return [
+                    'usuario_id' => $userId,
+                    'usuario' => $usuario ? [
+                        'id' => $usuario->usuario_id,
+                        'ci' => $persona ? $persona->ci : 'N/A',
+                        'nombre' => $persona ? $persona->nombre : 'N/A',
+                        'apellido' => $persona ? $persona->apellido : 'N/A',
+                        'email' => $usuario->email ?? 'N/A'
+                    ] : null,
+                    'total_acciones' => $group->count(),
+                    'acciones_por_tabla' => $group->groupBy('tabla')->map(function ($tableGroup) {
+                        return [
+                            'tabla' => $tableGroup->first()->tabla,
+                            'cantidad' => $tableGroup->count()
+                        ];
+                    })->values(),
+                    'ultima_actividad' => $group->first()->fecha
                 ];
             })->values();
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Reporte de inscripciones generado exitosamente',
-                'data' => [
-                    'inscripciones' => $inscripciones,
-                    'total_inscripciones' => $inscripciones->count(),
-                    'resumen' => [
-                        'monto_total' => $inscripciones->sum('costo_final'),
-                        'por_programa' => $porPrograma
-                    ]
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al generar reporte de inscripciones',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Reporte de rendimiento académico
-     */
-    public function academicPerformance(Request $request)
-    {
-        try {
-            $programaId = $request->input('programa_id');
-            $grupoId = $request->input('grupo_id');
-
-            $query = Grupo::with(['programa', 'estudiantes']);
-
-            if ($programaId) {
-                $query->where('Programa_id', $programaId);
-            }
-
-            if ($grupoId) {
-                $query->where('id', $grupoId);
-            }
-
-            $grupos = $query->get();
-
-            $reporteGrupos = $grupos->map(function ($grupo) {
-                $estudiantes = $grupo->estudiantes;
-                $conNotas = $estudiantes->filter(fn($e) => $e->pivot->nota !== null);
-                $notas = $conNotas->pluck('pivot.nota');
-
-                return [
-                    'grupo_id' => $grupo->id,
-                    'programa' => $grupo->programa->nombre,
-                    'fecha_ini' => $grupo->fecha_ini,
-                    'fecha_fin' => $grupo->fecha_fin,
-                    'total_estudiantes' => $estudiantes->count(),
-                    'con_notas' => $conNotas->count(),
-                    'sin_notas' => $estudiantes->count() - $conNotas->count(),
-                    'aprobados' => $conNotas->filter(fn($e) => $e->pivot->nota >= 51)->count(),
-                    'reprobados' => $conNotas->filter(fn($e) => $e->pivot->nota < 51)->count(),
-                    'promedio' => $notas->count() > 0 ? round($notas->avg(), 2) : 0,
-                    'nota_maxima' => $notas->count() > 0 ? $notas->max() : 0,
-                    'nota_minima' => $notas->count() > 0 ? $notas->min() : 0,
-                    'tasa_aprobacion' => $conNotas->count() > 0 
-                        ? round(($conNotas->filter(fn($e) => $e->pivot->nota >= 51)->count() / $conNotas->count()) * 100, 2)
-                        : 0
-                ];
-            });
+            $estadisticas = [
+                'periodo' => [
+                    'fecha_desde' => $fechaDesde,
+                    'fecha_hasta' => $fechaHasta
+                ],
+                'total_registros' => $registros->count(),
+                'usuarios_activos' => $actividadPorUsuario->count(),
+                'acciones_por_tabla' => $registros->groupBy('tabla')->map(function ($group) {
+                    return [
+                        'tabla' => $group->first()->tabla,
+                        'cantidad' => $group->count()
+                    ];
+                })->values(),
+                'acciones_por_dia' => $registros->groupBy('fecha')->map(function ($group, $fecha) {
+                    return [
+                        'fecha' => $fecha,
+                        'cantidad' => $group->count()
+                    ];
+                })->values()
+            ];
 
             return response()->json([
                 'success' => true,
-                'message' => 'Reporte de rendimiento académico generado exitosamente',
                 'data' => [
-                    'grupos' => $reporteGrupos,
-                    'resumen_general' => [
-                        'total_grupos' => $reporteGrupos->count(),
-                        'total_estudiantes' => $reporteGrupos->sum('total_estudiantes'),
-                        'total_aprobados' => $reporteGrupos->sum('aprobados'),
-                        'total_reprobados' => $reporteGrupos->sum('reprobados'),
-                        'promedio_general' => $reporteGrupos->avg('promedio')
-                    ]
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al generar reporte de rendimiento académico',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Reporte de documentos por estado
-     */
-    public function documents(Request $request)
-    {
-        try {
-            $estado = $request->input('estado'); // 0: pendiente, 1: aprobado, 2: rechazado
-
-            $query = Estudiante::with([
-                'documentos.tipoDocumento',
-                'estado'
+                    'actividad_por_usuario' => $actividadPorUsuario,
+                    'registros' => $registros->map(function ($registro) {
+                        return [
+                            'bitacora_id' => $registro->bitacora_id,
+                            'fecha' => $registro->fecha,
+                            'tabla' => $registro->tabla,
+                            'codTabla' => $registro->codTabla,
+                            'transaccion' => $registro->transaccion,
+                            'usuario' => $registro->usuario && $registro->usuario->persona ? [
+                                'id' => $registro->usuario->usuario_id,
+                                'nombre' => $registro->usuario->persona->nombre ?? 'N/A',
+                                'apellido' => $registro->usuario->persona->apellido ?? 'N/A'
+                            ] : null
+                        ];
+                    }),
+                    'estadisticas' => $estadisticas
+                ],
+                'message' => 'Reporte de actividad por usuario generado exitosamente'
             ]);
-
-            if ($estado !== null) {
-                $query->whereHas('documentos', function ($q) use ($estado) {
-                    $q->where('estado', $estado);
-                });
-            }
-
-            $estudiantes = $query->get()->map(function ($estudiante) {
-                $documentos = $estudiante->documentos;
-                
-                return [
-                    'estudiante' => $estudiante->nombre . ' ' . $estudiante->apellido,
-                    'ci' => $estudiante->ci,
-                    'registro' => $estudiante->registro_estudiante,
-                    'estado_estudiante' => $estudiante->estado->nombre_estado ?? '',
-                    'total_documentos' => $documentos->count(),
-                    'aprobados' => $documentos->where('estado', 1)->count(),
-                    'pendientes' => $documentos->where('estado', 0)->count(),
-                    'rechazados' => $documentos->where('estado', 2)->count()
-                ];
-            });
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Reporte de documentos generado exitosamente',
-                'data' => [
-                    'estudiantes' => $estudiantes,
-                    'resumen' => [
-                        'total_estudiantes' => $estudiantes->count(),
-                        'total_documentos_aprobados' => $estudiantes->sum('aprobados'),
-                        'total_documentos_pendientes' => $estudiantes->sum('pendientes'),
-                        'total_documentos_rechazados' => $estudiantes->sum('rechazados')
-                    ]
-                ]
-            ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al generar reporte de documentos',
-                'error' => $e->getMessage()
+                'message' => 'Error al generar reporte: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reporte de actividad por institución
+     */
+    public function actividadPorInstitucion(Request $request): JsonResponse
+    {
+        try {
+            $institucionId = $request->get('institucion_id');
+            $fechaDesde = $request->get('fecha_desde', now()->subDays(30)->toDateString());
+            $fechaHasta = $request->get('fecha_hasta', now()->toDateString());
+
+            $query = Institucion::with(['programas.inscripciones', 'convenios']);
+
+            if ($institucionId) {
+                $query->where('id', $institucionId);
+            }
+
+            $instituciones = $query->get();
+
+            $actividadPorInstitucion = $instituciones->map(function ($institucion) use ($fechaDesde, $fechaHasta) {
+                // Obtener inscripciones en el período
+                $inscripciones = $institucion->programas->flatMap(function ($programa) use ($fechaDesde, $fechaHasta) {
+                    return $programa->inscripciones->filter(function ($inscripcion) use ($fechaDesde, $fechaHasta) {
+                        return $inscripcion->fecha >= $fechaDesde && $inscripcion->fecha <= $fechaHasta;
+                    });
+                });
+
+                // Obtener convenios activos (fecha_fin >= now())
+                $conveniosActivos = $institucion->convenios->filter(function ($convenio) {
+                    return $convenio->fecha_fin && $convenio->fecha_fin >= now()->toDateString();
+                });
+
+                // Obtener programas activos
+                $programasActivos = $institucion->programas->filter(function ($programa) {
+                    return $programa->institucion && $programa->institucion->estado === 'activo';
+                });
+
+                return [
+                    'institucion_id' => $institucion->id,
+                    'nombre' => $institucion->nombre,
+                    'estado' => $institucion->estado,
+                    'actividad' => [
+                        'total_inscripciones' => $inscripciones->count(),
+                        'inscripciones_periodo' => $inscripciones->count(),
+                        'convenios_activos' => $conveniosActivos->count(),
+                        'programas_activos' => $programasActivos->count(),
+                        'total_programas' => $institucion->programas->count()
+                    ],
+                    'programas' => $programasActivos->map(function ($programa) {
+                        return [
+                            'id' => $programa->id,
+                            'nombre' => $programa->nombre,
+                            'inscripciones' => $programa->inscripciones->count()
+                        ];
+                    })
+                ];
+            });
+
+            $estadisticas = [
+                'periodo' => [
+                    'fecha_desde' => $fechaDesde,
+                    'fecha_hasta' => $fechaHasta
+                ],
+                'total_instituciones' => $instituciones->count(),
+                'total_inscripciones' => $instituciones->sum(function ($inst) {
+                    return $inst->programas->sum(function ($prog) {
+                        return $prog->inscripciones->count();
+                    });
+                }),
+                'total_convenios_activos' => $instituciones->sum(function ($inst) {
+                    return $inst->convenios->filter(function ($convenio) {
+                        return $convenio->fecha_fin && $convenio->fecha_fin >= now()->toDateString();
+                    })->count();
+                }),
+                'total_programas_activos' => $instituciones->sum(function ($inst) {
+                    return $inst->programas->filter(function ($prog) {
+                        return $prog->institucion && $prog->institucion->estado === 'activo';
+                    })->count();
+                })
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'actividad_por_institucion' => $actividadPorInstitucion,
+                    'estadisticas' => $estadisticas
+                ],
+                'message' => 'Reporte de actividad por institución generado exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al generar reporte: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener datos para filtros de reportes
+     */
+    public function datosFormulario(): JsonResponse
+    {
+        try {
+            $tiposConvenio = DB::table('tipo_convenio')->select('tipo_convenio_id as id', 'nombre_tipo as nombre')->get();
+            $ramasAcademicas = DB::table('rama_academica')->select('id', 'nombre')->get();
+            $tiposPrograma = DB::table('tipo_programa')->select('id', 'nombre')->get();
+            $estadosEstudiante = DB::table('estado_estudiante')->select('id', 'nombre_estado as nombre')->get();
+            $instituciones = DB::table('institucion')->select('id', 'nombre')->get();
+            $usuarios = DB::table('usuario')
+                ->leftJoin('persona', 'usuario.persona_id', '=', 'persona.id')
+                ->select('usuario.usuario_id as id', 'usuario.email', 'persona.ci')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'tipos_convenio' => $tiposConvenio,
+                    'ramas_academicas' => $ramasAcademicas,
+                    'tipos_programa' => $tiposPrograma,
+                    'estados_estudiante' => $estadosEstudiante,
+                    'instituciones' => $instituciones,
+                    'usuarios' => $usuarios
+                ],
+                'message' => 'Datos de formulario obtenidos exitosamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener datos: ' . $e->getMessage()
             ], 500);
         }
     }

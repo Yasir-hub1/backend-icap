@@ -9,7 +9,7 @@ class TipoPrograma extends Model
 {
     protected $table = 'tipo_programa';
     protected $primaryKey = 'id';
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'nombre'

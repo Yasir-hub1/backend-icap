@@ -14,7 +14,7 @@ class VerificacionPagoController extends Controller
     /**
      * Lista pagos pendientes de verificación
      */
-    public function index(Request $request)
+    public function listar(Request $request)
     {
         try {
             $perPage = $request->input('per_page', 15);
@@ -22,12 +22,13 @@ class VerificacionPagoController extends Controller
             $metodo = $request->input('metodo', '');
 
             $pagos = Pago::with([
-                    'cuota.planPagos.inscripcion.estudiante',
-                    'cuota.planPagos.inscripcion.programa'
+                    'cuota.planPago.inscripcion.estudiante.usuario',
+                    'cuota.planPago.inscripcion.programa.ramaAcademica',
+                    'cuota.planPago.inscripcion.programa.tipoPrograma',
+                    'cuota.planPago.inscripcion.programa.institucion'
                 ])
-                ->where('verificado', false)
                 ->when($search, function ($query) use ($search) {
-                    $query->whereHas('cuota.planPagos.inscripcion.estudiante', function ($q) use ($search) {
+                    $query->whereHas('cuota.planPago.inscripcion.estudiante', function ($q) use ($search) {
                         $q->where('nombre', 'ILIKE', "%{$search}%")
                           ->orWhere('apellido', 'ILIKE', "%{$search}%")
                           ->orWhere('ci', 'ILIKE', "%{$search}%")
@@ -37,26 +38,44 @@ class VerificacionPagoController extends Controller
                 ->when($metodo, function ($query) use ($metodo) {
                     $query->where('metodo', $metodo);
                 })
-                ->orderBy('fecha', 'asc')
+                ->orderBy('fecha', 'desc')
                 ->paginate($perPage);
 
             $pagos->getCollection()->transform(function ($pago) {
-                $estudiante = $pago->cuota->planPagos->inscripcion->estudiante;
-                $programa = $pago->cuota->planPagos->inscripcion->programa;
+                $planPago = $pago->cuota->planPago;
+                $inscripcion = $planPago ? $planPago->inscripcion : null;
+                $estudiante = $inscripcion ? $inscripcion->estudiante : null;
+                $programa = $inscripcion ? $inscripcion->programa : null;
 
                 return [
                     'id' => $pago->id,
                     'fecha' => $pago->fecha,
                     'monto' => $pago->monto,
                     'metodo' => $pago->metodo,
-                    'estudiante' => [
+                    'verificado' => $pago->verificado,
+                    'fecha_verificacion' => $pago->fecha_verificacion,
+                    'estudiante' => $estudiante ? [
                         'id' => $estudiante->id,
+                        'nombre' => $estudiante->nombre,
+                        'apellido' => $estudiante->apellido,
                         'nombre_completo' => $estudiante->nombre . ' ' . $estudiante->apellido,
                         'ci' => $estudiante->ci,
-                        'registro' => $estudiante->registro_estudiante
+                        'registro_estudiante' => $estudiante->registro_estudiante,
+                        'email' => $estudiante->usuario->email ?? 'N/A'
+                    ] : null,
+                    'programa' => $programa ? [
+                        'id' => $programa->id,
+                        'nombre' => $programa->nombre,
+                        'rama_academica' => $programa->ramaAcademica->nombre ?? 'N/A',
+                        'tipo_programa' => $programa->tipoPrograma->nombre ?? 'N/A',
+                        'institucion' => $programa->institucion->nombre ?? 'N/A'
+                    ] : null,
+                    'cuota' => [
+                        'id' => $pago->cuota->id,
+                        'fecha_ini' => $pago->cuota->fecha_ini,
+                        'fecha_fin' => $pago->cuota->fecha_fin,
+                        'monto' => $pago->cuota->monto
                     ],
-                    'programa' => $programa->nombre,
-                    'cuota_id' => $pago->cuota->id,
                     'comprobante_url' => $pago->comprobante_path ? Storage::url($pago->comprobante_path) : null,
                     'observaciones' => $pago->observaciones,
                     'token' => $pago->token
@@ -69,7 +88,9 @@ class VerificacionPagoController extends Controller
                 'data' => $pagos,
                 'resumen' => [
                     'total_pendientes' => Pago::where('verificado', false)->count(),
-                    'total_monto_pendiente' => Pago::where('verificado', false)->sum('monto')
+                    'total_verificados' => Pago::where('verificado', true)->count(),
+                    'total_monto_pendiente' => Pago::where('verificado', false)->sum('monto'),
+                    'total_monto_verificado' => Pago::where('verificado', true)->sum('monto')
                 ]
             ], 200);
 
@@ -85,48 +106,69 @@ class VerificacionPagoController extends Controller
     /**
      * Ver detalle de un pago
      */
-    public function show($pagoId)
+    public function obtener($pagoId)
     {
         try {
             $pago = Pago::with([
-                    'cuota.planPagos.inscripcion.estudiante',
-                    'cuota.planPagos.inscripcion.programa',
-                    'verificador'
+                    'cuota.planPago.inscripcion.estudiante.usuario',
+                    'cuota.planPago.inscripcion.programa.ramaAcademica',
+                    'cuota.planPago.inscripcion.programa.tipoPrograma',
+                    'cuota.planPago.inscripcion.programa.institucion',
+                    'verificador.persona'
                 ])
                 ->findOrFail($pagoId);
 
-            $estudiante = $pago->cuota->planPagos->inscripcion->estudiante;
+            $planPago = $pago->cuota->planPago;
+            $inscripcion = $planPago ? $planPago->inscripcion : null;
+            $estudiante = $inscripcion ? $inscripcion->estudiante : null;
+            $programa = $inscripcion ? $inscripcion->programa : null;
 
             return response()->json([
                 'success' => true,
                 'message' => 'Detalle de pago obtenido exitosamente',
                 'data' => [
-                    'pago' => [
-                        'id' => $pago->id,
-                        'fecha' => $pago->fecha,
-                        'monto' => $pago->monto,
-                        'metodo' => $pago->metodo,
-                        'token' => $pago->token,
-                        'verificado' => $pago->verificado,
-                        'fecha_verificacion' => $pago->fecha_verificacion,
-                        'verificado_por_nombre' => $pago->verificador ? $pago->verificador->nombre : null,
-                        'comprobante_url' => $pago->comprobante_path ? Storage::url($pago->comprobante_path) : null,
-                        'observaciones' => $pago->observaciones
-                    ],
-                    'estudiante' => [
+                    'id' => $pago->id,
+                    'fecha' => $pago->fecha,
+                    'monto' => $pago->monto,
+                    'metodo' => $pago->metodo,
+                    'token' => $pago->token,
+                    'verificado' => $pago->verificado,
+                    'fecha_verificacion' => $pago->fecha_verificacion,
+                    'verificado_por' => $pago->verificador ? [
+                        'id' => $pago->verificador->usuario_id,
+                        'nombre' => $pago->verificador->persona->nombre ?? 'N/A',
+                        'apellido' => $pago->verificador->persona->apellido ?? 'N/A'
+                    ] : null,
+                    'comprobante_url' => $pago->comprobante_path ? Storage::url($pago->comprobante_path) : null,
+                    'observaciones' => $pago->observaciones,
+                    'estudiante' => $estudiante ? [
                         'id' => $estudiante->id,
+                        'nombre' => $estudiante->nombre,
+                        'apellido' => $estudiante->apellido,
                         'nombre_completo' => $estudiante->nombre . ' ' . $estudiante->apellido,
                         'ci' => $estudiante->ci,
-                        'registro' => $estudiante->registro_estudiante,
-                        'celular' => $estudiante->celular
-                    ],
-                    'programa' => $pago->cuota->planPagos->inscripcion->programa,
+                        'registro_estudiante' => $estudiante->registro_estudiante,
+                        'celular' => $estudiante->celular,
+                        'email' => $estudiante->usuario->email ?? 'N/A'
+                    ] : null,
+                    'programa' => $programa ? [
+                        'id' => $programa->id,
+                        'nombre' => $programa->nombre,
+                        'rama_academica' => $programa->ramaAcademica->nombre ?? 'N/A',
+                        'tipo_programa' => $programa->tipoPrograma->nombre ?? 'N/A',
+                        'institucion' => $programa->institucion->nombre ?? 'N/A'
+                    ] : null,
                     'cuota' => [
                         'id' => $pago->cuota->id,
                         'monto' => $pago->cuota->monto,
                         'fecha_ini' => $pago->cuota->fecha_ini,
                         'fecha_fin' => $pago->cuota->fecha_fin
-                    ]
+                    ],
+                    'inscripcion' => $inscripcion ? [
+                        'id' => $inscripcion->id,
+                        'fecha' => $inscripcion->fecha,
+                        'fecha_formatted' => $inscripcion->fecha ? \Carbon\Carbon::parse($inscripcion->fecha)->format('d/m/Y') : 'N/A'
+                    ] : null
                 ]
             ], 200);
 
@@ -142,15 +184,15 @@ class VerificacionPagoController extends Controller
     /**
      * Aprobar/verificar un pago
      */
-    public function approve(Request $request, $pagoId)
+    public function aprobar(Request $request, $pagoId)
     {
         DB::beginTransaction();
         try {
-            $admin = $request->auth_user;
+            $admin = auth()->user();
 
             $pago = Pago::with([
-                    'cuota.planPagos.inscripcion.estudiante',
-                    'cuota.planPagos.inscripcion.programa'
+                    'cuota.planPago.inscripcion.estudiante',
+                    'cuota.planPago.inscripcion.programa'
                 ])
                 ->findOrFail($pagoId);
 
@@ -164,21 +206,27 @@ class VerificacionPagoController extends Controller
             // Verificar pago
             $pago->verificado = true;
             $pago->fecha_verificacion = now();
-            $pago->verificado_por = $admin->id;
+            $pago->verificado_por = $admin->usuario_id ?? $admin->id ?? auth()->id();
             $pago->observaciones = $request->input('observaciones', $pago->observaciones);
             $pago->save();
 
-            $estudiante = $pago->cuota->planPagos->inscripcion->estudiante;
-            $programa = $pago->cuota->planPagos->inscripcion->programa;
+            $planPago = $pago->cuota->planPago;
+            $inscripcion = $planPago ? $planPago->inscripcion : null;
+            $estudiante = $inscripcion ? $inscripcion->estudiante : null;
+            $programa = $inscripcion ? $inscripcion->programa : null;
 
             // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'pagos',
-                'codTable' => $pago->id,
-                'transaccion' => "Pago de {$pago->monto} Bs del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) para el programa '{$programa->nombre}' fue VERIFICADO Y APROBADO por {$admin->nombre} {$admin->apellido}",
-                'Usuario_id' => $admin->id
-            ]);
+            if ($estudiante && $programa) {
+                $adminNombre = $admin->nombre ?? $admin->persona->nombre ?? 'Admin';
+                $adminApellido = $admin->apellido ?? $admin->persona->apellido ?? '';
+                Bitacora::create([
+                    'fecha' => now()->toDateString(),
+                    'tabla' => 'pagos',
+                    'codTabla' => $pago->id,
+                    'transaccion' => "Pago de {$pago->monto} Bs del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) para el programa '{$programa->nombre}' fue VERIFICADO Y APROBADO por {$adminNombre} {$adminApellido}",
+                    'usuario_id' => $admin->usuario_id ?? $admin->id ?? auth()->id()
+                ]);
+            }
 
             DB::commit();
 
@@ -201,7 +249,7 @@ class VerificacionPagoController extends Controller
     /**
      * Rechazar un pago
      */
-    public function reject(Request $request, $pagoId)
+    public function rechazar(Request $request, $pagoId)
     {
         $request->validate([
             'motivo' => 'required|string|min:10'
@@ -209,11 +257,11 @@ class VerificacionPagoController extends Controller
 
         DB::beginTransaction();
         try {
-            $admin = $request->auth_user;
+            $admin = auth()->user();
 
             $pago = Pago::with([
-                    'cuota.planPagos.inscripcion.estudiante',
-                    'cuota.planPagos.inscripcion.programa'
+                    'cuota.planPago.inscripcion.estudiante',
+                    'cuota.planPago.inscripcion.programa'
                 ])
                 ->findOrFail($pagoId);
 
@@ -224,25 +272,31 @@ class VerificacionPagoController extends Controller
                 ], 400);
             }
 
-            $estudiante = $pago->cuota->planPagos->inscripcion->estudiante;
-            $programa = $pago->cuota->planPagos->inscripcion->programa;
+            $planPago = $pago->cuota->planPago;
+            $inscripcion = $planPago ? $planPago->inscripcion : null;
+            $estudiante = $inscripcion ? $inscripcion->estudiante : null;
+            $programa = $inscripcion ? $inscripcion->programa : null;
 
             // Actualizar observaciones con motivo de rechazo
+            $pagoData = $pago->toArray();
             $pago->observaciones = "RECHAZADO: " . $request->motivo;
             $pago->save();
 
             // Eliminar el pago rechazado
-            $pagoData = $pago->toArray();
             $pago->delete();
 
             // Registrar en bitácora
-            Bitacora::create([
-                'fecha_hora' => now(),
-                'tabla' => 'pagos',
-                'codTable' => $pagoData['id'],
-                'transaccion' => "Pago de {$pagoData['monto']} Bs del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) para el programa '{$programa->nombre}' fue RECHAZADO por {$admin->nombre} {$admin->apellido}. Motivo: {$request->motivo}",
-                'Usuario_id' => $admin->id
-            ]);
+            if ($estudiante && $programa) {
+                $adminNombre = $admin->nombre ?? $admin->persona->nombre ?? 'Admin';
+                $adminApellido = $admin->apellido ?? $admin->persona->apellido ?? '';
+                Bitacora::create([
+                    'fecha' => now()->toDateString(),
+                    'tabla' => 'pagos',
+                    'codTabla' => $pagoData['id'],
+                    'transaccion' => "Pago de {$pagoData['monto']} Bs del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) para el programa '{$programa->nombre}' fue RECHAZADO por {$adminNombre} {$adminApellido}. Motivo: {$request->motivo}",
+                    'usuario_id' => $admin->usuario_id ?? $admin->id ?? auth()->id()
+                ]);
+            }
 
             DB::commit();
 
@@ -267,15 +321,15 @@ class VerificacionPagoController extends Controller
     /**
      * Obtener resumen de pagos verificados
      */
-    public function getVerifiedSummary(Request $request)
+    public function obtenerResumenVerificados(Request $request)
     {
         try {
-            $fechaInicio = $request->input('fecha_inicio', now()->startOfMonth());
-            $fechaFin = $request->input('fecha_fin', now()->endOfMonth());
+            $fechaInicio = $request->input('fecha_inicio', now()->startOfMonth()->toDateString());
+            $fechaFin = $request->input('fecha_fin', now()->endOfMonth()->toDateString());
 
             $pagosVerificados = Pago::where('verificado', true)
                 ->whereBetween('fecha_verificacion', [$fechaInicio, $fechaFin])
-                ->with(['cuota.planPagos.inscripcion.programa'])
+                ->with(['cuota.planPago.inscripcion.programa'])
                 ->get();
 
             $resumen = [
@@ -286,8 +340,10 @@ class VerificacionPagoController extends Controller
                     'TRANSFERENCIA' => $pagosVerificados->where('metodo', 'TRANSFERENCIA')->sum('monto'),
                     'EFECTIVO' => $pagosVerificados->where('metodo', 'EFECTIVO')->sum('monto')
                 ],
-                'por_programa' => $pagosVerificados->groupBy(function ($pago) {
-                    return $pago->cuota->planPagos->inscripcion->programa->nombre;
+                'por_programa' => $pagosVerificados->filter(function ($pago) {
+                    return $pago->cuota && $pago->cuota->planPago && $pago->cuota->planPago->inscripcion && $pago->cuota->planPago->inscripcion->programa;
+                })->groupBy(function ($pago) {
+                    return $pago->cuota->planPago->inscripcion->programa->nombre;
                 })->map(function ($pagos, $programa) {
                     return [
                         'programa' => $programa,
