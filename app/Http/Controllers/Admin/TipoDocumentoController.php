@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\TipoDocumento;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class TipoDocumentoController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar tipos de documento con paginación
      */
@@ -91,6 +93,9 @@ class TipoDocumentoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('tipo_documento', $tipo->tipo_documento_id, "Tipo: {$tipo->nombre_entidad}");
+
             return response()->json([
                 'success' => true,
                 'data' => $tipo,
@@ -134,6 +139,9 @@ class TipoDocumentoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarEdicion('tipo_documento', $tipo->tipo_documento_id, "Tipo: {$tipo->nombre_entidad}");
+
             return response()->json([
                 'success' => true,
                 'data' => $tipo,
@@ -166,12 +174,19 @@ class TipoDocumentoController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar datos para bitácora antes de eliminar
+            $nombreTipo = $tipo->nombre_entidad;
+            $tipoId = $tipo->tipo_documento_id;
+
             $tipo->delete();
 
             Cache::forget('tipos_documento_all');
             Cache::forget('catalogos_tipos_documento');
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('tipo_documento', $tipoId, "Tipo: {$nombreTipo}");
 
             return response()->json([
                 'success' => true,

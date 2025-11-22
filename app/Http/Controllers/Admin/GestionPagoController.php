@@ -8,6 +8,8 @@ use App\Models\Cuota;
 use App\Models\PlanPagos;
 use App\Models\Inscripcion;
 use App\Models\Bitacora;
+use App\Traits\RegistraBitacora;
+use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +18,7 @@ use Carbon\Carbon;
 
 class GestionPagoController extends Controller
 {
+    use RegistraBitacora, EnviaNotificaciones;
     /**
      * Listar todos los pagos con filtros
      */
@@ -196,12 +199,12 @@ class GestionPagoController extends Controller
 
             // Verificar si todas las cuotas del plan están pagadas
             $plan = $cuota->planPago;
-            $this->verificarEstadoPlan($plan);
+            $planCompletado = $this->verificarEstadoPlan($plan);
 
             // Registrar en bitácora
             $usuario = $admin->usuario ?? null;
-            if ($usuario) {
-                $estudiante = $plan->inscripcion->estudiante;
+            $estudiante = $plan->inscripcion->estudiante ?? null;
+            if ($usuario && $estudiante) {
                 Bitacora::create([
                     'fecha' => now()->toDateString(),
                     'tabla' => 'Pagos',
@@ -209,6 +212,17 @@ class GestionPagoController extends Controller
                     'transaccion' => "Administrador registró pago manual de {$request->monto} Bs para el estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}). Token: " . ($request->token ?? 'N/A'),
                     'usuario_id' => $usuario->usuario_id
                 ]);
+            }
+
+            // Enviar notificaciones
+            if ($estudiante) {
+                $concepto = "Cuota del plan de pago";
+                $this->notificarPagoRegistrado($estudiante, $request->monto, $concepto, $pago->id, true);
+
+                // Si el plan está completo, notificar
+                if ($planCompletado) {
+                    $this->notificarPlanPagoCompletado($estudiante, $plan->monto_total, $plan->id);
+                }
             }
 
             DB::commit();
@@ -333,16 +347,8 @@ class GestionPagoController extends Controller
             $this->verificarEstadoPlan($plan);
 
             // Registrar en bitácora
-            $usuario = $admin->usuario ?? null;
-            if ($usuario) {
-                Bitacora::create([
-                    'fecha' => now()->toDateString(),
-                    'tabla' => 'Pagos',
-                    'codTabla' => $pago->id,
-                    'transaccion' => "Administrador actualizó pago ID {$pago->id}. Cambios: " . json_encode($datosActualizacion),
-                    'usuario_id' => $usuario->usuario_id
-                ]);
-            }
+            $descripcion = "Cambios: " . json_encode($datosActualizacion);
+            $this->registrarEdicion('pagos', $pago->id, $descripcion);
 
             DB::commit();
 
@@ -376,17 +382,7 @@ class GestionPagoController extends Controller
             $this->verificarEstadoPlan($plan);
 
             // Registrar en bitácora
-            $admin = request()->auth_user;
-            $usuario = $admin->usuario ?? null;
-            if ($usuario) {
-                Bitacora::create([
-                    'fecha' => now()->toDateString(),
-                    'tabla' => 'Pagos',
-                    'codTabla' => $pagoId,
-                    'transaccion' => "Administrador eliminó pago ID {$pagoId}",
-                    'usuario_id' => $usuario->usuario_id
-                ]);
-            }
+            $this->registrarEliminacion('pagos', $pagoId, "Pago ID {$pagoId}");
 
             DB::commit();
 
@@ -406,7 +402,7 @@ class GestionPagoController extends Controller
     /**
      * Verificar y actualizar estado del plan cuando todas las cuotas están pagadas
      */
-    private function verificarEstadoPlan(PlanPagos $plan)
+    private function verificarEstadoPlan(PlanPagos $plan): bool
     {
         $cuotas = $plan->cuotas;
         $todasPagadas = true;
@@ -421,6 +417,8 @@ class GestionPagoController extends Controller
         // Si todas las cuotas están pagadas, el plan está completo
         // Esto se verifica automáticamente con el accessor esta_completo
         // No necesitamos guardar un estado adicional, se calcula dinámicamente
+
+        return $todasPagadas;
     }
 }
 

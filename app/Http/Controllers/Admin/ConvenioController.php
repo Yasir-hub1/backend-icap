@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Convenio;
 use App\Models\TipoConvenio;
 use App\Models\Institucion;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 
 class ConvenioController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar convenios con paginación y filtros
      */
@@ -242,6 +244,9 @@ class ConvenioController extends Controller
             // Crear convenio
             $convenio = Convenio::create($data);
 
+            // Registrar en bitácora
+            $this->registrarCreacion('convenio', $convenio->convenio_id, "Convenio: {$convenio->numero_convenio} - {$convenio->objeto_convenio}");
+
             // Asociar instituciones
             $institucionesData = [];
             foreach ($instituciones as $institucion) {
@@ -387,9 +392,13 @@ class ConvenioController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $convenioActualizado = $convenio->fresh();
+            $this->registrarEdicion('convenio', $convenioActualizado->convenio_id, "Convenio: {$convenioActualizado->numero_convenio} - {$convenioActualizado->objeto_convenio}");
+
             return response()->json([
                 'success' => true,
-                'data' => $convenio->load(['tipoConvenio', 'instituciones']),
+                'data' => $convenioActualizado->load(['tipoConvenio', 'instituciones']),
                 'message' => 'Convenio actualizado exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -435,6 +444,10 @@ class ConvenioController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar información antes de eliminar para bitácora
+            $convenioInfo = "{$convenio->numero_convenio} - {$convenio->objeto_convenio}";
+            $convenioId = $convenio->convenio_id;
+
             // Desasociar instituciones
             $convenio->instituciones()->detach();
 
@@ -443,6 +456,9 @@ class ConvenioController extends Controller
             Cache::forget('convenios_*');
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('convenio', $convenioId, "Convenio: {$convenioInfo}");
 
             return response()->json([
                 'success' => true,

@@ -7,6 +7,7 @@ use App\Models\PlanPagos;
 use App\Models\Inscripcion;
 use App\Models\Cuota;
 use App\Models\Programa;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,7 @@ use Carbon\Carbon;
 
 class PlanPagoController extends Controller
 {
+    use RegistraBitacora, EnviaNotificaciones;
     /**
      * Listar planes de pago con paginación
      */
@@ -456,6 +458,19 @@ class PlanPagoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $plan->load('inscripcion.estudiante');
+            $estudiante = $plan->inscripcion->estudiante ?? null;
+            $descripcion = "Plan de pago creado - Inscripción ID: {$plan->inscripcion_id}" . 
+                ($estudiante ? " - Estudiante: {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" : "") . 
+                " - Monto: {$plan->monto_total} - Cuotas: {$plan->total_cuotas}";
+            $this->registrarCreacion('plan_pago', $plan->id, $descripcion);
+
+            // Enviar notificación al estudiante
+            if ($estudiante) {
+                $this->notificarPlanPagoCreado($estudiante, $plan->monto_total, $plan->total_cuotas, $plan->id);
+            }
+
             // Recargar con relaciones
             $plan->load([
                 'inscripcion.estudiante.usuario',
@@ -647,6 +662,14 @@ class PlanPagoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $plan->load('inscripcion.estudiante');
+            $estudiante = $plan->inscripcion->estudiante ?? null;
+            $descripcion = "Plan de pago actualizado - Inscripción ID: {$plan->inscripcion_id}" . 
+                ($estudiante ? " - Estudiante: {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" : "") . 
+                " - Monto: {$plan->monto_total} - Cuotas: {$plan->total_cuotas}";
+            $this->registrarEdicion('plan_pago', $plan->id, $descripcion);
+
             // Recargar con relaciones
             $plan->load([
                 'inscripcion.estudiante.usuario',
@@ -774,6 +797,14 @@ class PlanPagoController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar datos para bitácora antes de eliminar
+            $planId = $plan->id;
+            $inscripcionId = $plan->inscripcion_id;
+            $estudiante = $plan->inscripcion->estudiante ?? null;
+            $descripcion = "Plan de pago eliminado - Inscripción ID: {$inscripcionId}" . 
+                ($estudiante ? " - Estudiante: {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" : "") . 
+                " - Monto: {$plan->monto_total}";
+
             // Eliminar cuotas
             $plan->cuotas()->delete();
 
@@ -781,6 +812,9 @@ class PlanPagoController extends Controller
             $plan->delete();
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('plan_pago', $planId, $descripcion);
 
             return response()->json([
                 'success' => true,

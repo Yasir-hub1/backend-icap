@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Horario;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class HorarioController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar horarios con paginación
      */
@@ -122,6 +124,9 @@ class HorarioController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('horario', $horario->horario_id, "Horario: {$horario->dias} {$horario->hora_ini}-{$horario->hora_fin}");
+
             return response()->json([
                 'success' => true,
                 'data' => $horario,
@@ -178,9 +183,13 @@ class HorarioController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $horarioActualizado = $horario->fresh();
+            $this->registrarEdicion('horario', $horarioActualizado->horario_id, "Horario: {$horarioActualizado->dias} {$horarioActualizado->hora_ini}-{$horarioActualizado->hora_fin}");
+
             return response()->json([
                 'success' => true,
-                'data' => $horario,
+                'data' => $horarioActualizado,
                 'message' => 'Horario actualizado exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -216,12 +225,19 @@ class HorarioController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar información antes de eliminar para bitácora
+            $horarioInfo = "{$horario->dias} {$horario->hora_ini}-{$horario->hora_fin}";
+            $horarioId = $horario->horario_id;
+
             $horario->delete();
 
             Cache::forget('horarios_all');
             Cache::forget('catalogos_horarios');
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('horario', $horarioId, "Horario: {$horarioInfo}");
 
             return response()->json([
                 'success' => true,

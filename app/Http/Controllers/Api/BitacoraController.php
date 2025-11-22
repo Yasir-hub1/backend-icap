@@ -15,7 +15,7 @@ class BitacoraController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Bitacora::with(['usuario:id,ci,nombre,apellido']);
+        $query = Bitacora::with(['usuario.persona']);
 
         if ($request->filled('usuario_id')) {
             $query->where('usuario_id', $request->get('usuario_id'));
@@ -44,6 +44,34 @@ class BitacoraController extends Controller
         $perPage = $request->get('per_page', 50);
         $bitacora = $query->orderBy('fecha', 'desc')->orderBy('created_at', 'desc')->paginate($perPage);
 
+        // Formatear datos para el frontend
+        $bitacora->getCollection()->transform(function ($registro) {
+            $usuario = $registro->usuario;
+            $persona = $usuario->persona ?? null;
+            
+            return [
+                'id' => $registro->bitacora_id,
+                'bitacora_id' => $registro->bitacora_id,
+                'fecha' => $registro->fecha,
+                'tabla' => $registro->tabla,
+                'codTabla' => $registro->codTabla,
+                'transaccion' => $registro->transaccion,
+                'usuario_id' => $registro->usuario_id,
+                'usuario' => $usuario ? [
+                    'id' => $usuario->usuario_id,
+                    'email' => $usuario->email,
+                    'persona' => $persona ? [
+                        'nombre' => $persona->nombre,
+                        'apellido' => $persona->apellido,
+                        'ci' => $persona->ci,
+                        'nombre_completo' => "{$persona->nombre} {$persona->apellido}"
+                    ] : null
+                ] : null,
+                'created_at' => $registro->created_at,
+                'updated_at' => $registro->updated_at
+            ];
+        });
+
         return response()->json([
             'success' => true,
             'data' => $bitacora,
@@ -56,12 +84,38 @@ class BitacoraController extends Controller
      */
     public function show(int $id): JsonResponse
     {
-        $registro = Bitacora::with(['usuario:id,ci,nombre,apellido'])
+        $registro = Bitacora::with(['usuario.persona'])
             ->findOrFail($id);
+
+        // Formatear datos para el frontend
+        $usuario = $registro->usuario;
+        $persona = $usuario->persona ?? null;
+        
+        $registroFormatted = [
+            'id' => $registro->bitacora_id,
+            'bitacora_id' => $registro->bitacora_id,
+            'fecha' => $registro->fecha,
+            'tabla' => $registro->tabla,
+            'codTabla' => $registro->codTabla,
+            'transaccion' => $registro->transaccion,
+            'usuario_id' => $registro->usuario_id,
+            'usuario' => $usuario ? [
+                'id' => $usuario->usuario_id,
+                'email' => $usuario->email,
+                'persona' => $persona ? [
+                    'nombre' => $persona->nombre,
+                    'apellido' => $persona->apellido,
+                    'ci' => $persona->ci,
+                    'nombre_completo' => "{$persona->nombre} {$persona->apellido}"
+                ] : null
+            ] : null,
+            'created_at' => $registro->created_at,
+            'updated_at' => $registro->updated_at
+        ];
 
         return response()->json([
             'success' => true,
-            'data' => $registro,
+            'data' => $registroFormatted,
             'message' => 'Registro de bitácora obtenido exitosamente'
         ]);
     }
@@ -109,11 +163,29 @@ class BitacoraController extends Controller
                 ->orderBy('total', 'desc')
                 ->get(),
             'por_usuario' => $query->select('usuario_id', DB::raw('count(*) as total'))
-                ->with('usuario:id,ci,nombre,apellido')
+                ->with('usuario.persona')
                 ->groupBy('usuario_id')
                 ->orderBy('total', 'desc')
                 ->limit(10)
-                ->get(),
+                ->get()
+                ->map(function ($item) {
+                    $usuario = $item->usuario;
+                    $persona = $usuario->persona ?? null;
+                    return [
+                        'usuario_id' => $item->usuario_id,
+                        'total' => $item->total,
+                        'usuario' => $usuario ? [
+                            'id' => $usuario->usuario_id,
+                            'email' => $usuario->email,
+                            'persona' => $persona ? [
+                                'nombre' => $persona->nombre,
+                                'apellido' => $persona->apellido,
+                                'ci' => $persona->ci,
+                                'nombre_completo' => "{$persona->nombre} {$persona->apellido}"
+                            ] : null
+                        ] : null
+                    ];
+                }),
             'por_transaccion' => $query->select('transaccion', DB::raw('count(*) as total'))
                 ->groupBy('transaccion')
                 ->orderBy('total', 'desc')

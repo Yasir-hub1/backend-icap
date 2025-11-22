@@ -18,6 +18,7 @@ use Carbon\Carbon;
 
 class InscripcionController extends Controller
 {
+    use EnviaNotificaciones;
     /**
      * Listar programas activos disponibles para inscripción
      */
@@ -407,6 +408,10 @@ class InscripcionController extends Controller
                     'usuario_id' => $usuario->usuario_id
                 ]);
             }
+
+            // Enviar notificaciones
+            $this->notificarNuevaInscripcion($estudiante, $programa->nombre, $inscripcion->id);
+            $this->notificarPlanPagoCreado($estudiante, $montoTotal, $numeroCuotas, $planPagos->id);
 
             DB::commit();
 

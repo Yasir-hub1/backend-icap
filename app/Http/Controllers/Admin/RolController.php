@@ -5,33 +5,63 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Rol;
 use App\Models\Permiso;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 
 class RolController extends Controller
 {
+    use RegistraBitacora;
     /**
-     * Listar todos los roles con sus permisos
+     * Listar todos los roles con sus permisos (con paginación)
      */
     public function listar(Request $request)
     {
         try {
-            // Eager loading de permisos y contar usuarios
-            $roles = Rol::with('permisos')
-                ->withCount('usuarios')
-                ->orderBy('nombre_rol')
-                ->get();
+            $perPage = $request->get('per_page', 10);
+            $search = $request->get('search', '');
+            $sortBy = $request->get('sort_by', 'nombre_rol');
+            $sortOrder = $request->get('sort_order', 'asc');
+
+            // Validar sort_by
+            $allowedSortColumns = ['nombre_rol', 'descripcion', 'activo', 'created_at'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'nombre_rol';
+            }
+
+            // Validar sort_order
+            $sortOrder = strtolower($sortOrder) === 'desc' ? 'desc' : 'asc';
+
+            $query = Rol::with('permisos')
+                ->withCount('usuarios');
+
+            // Búsqueda
+            if ($search) {
+                $query->where(function($q) use ($search) {
+                    $q->where('nombre_rol', 'ILIKE', "%{$search}%")
+                      ->orWhere('descripcion', 'ILIKE', "%{$search}%");
+                });
+            }
+
+            // Ordenamiento
+            $query->orderBy($sortBy, $sortOrder);
+
+            // Paginación
+            $perPage = max(1, min(100, (int)$perPage)); // Limitar entre 1 y 100
+            $roles = $query->paginate($perPage);
 
             // Formatear la respuesta para incluir todos los datos necesarios
-            $rolesFormatted = $roles->map(function ($rol) {
+            $roles->getCollection()->transform(function ($rol) {
                 return [
                     'id' => $rol->rol_id,
                     'rol_id' => $rol->rol_id,
                     'nombre_rol' => $rol->nombre_rol,
+                    'nombre' => $rol->nombre_rol, // Alias para compatibilidad
                     'descripcion' => $rol->descripcion,
                     'activo' => $rol->activo,
                     'usuarios_count' => $rol->usuarios_count,
+                    'permisos_count' => $rol->permisos->count(),
                     'permisos' => $rol->permisos->map(function ($permiso) {
                         return [
                             'id' => $permiso->permiso_id,
@@ -50,7 +80,7 @@ class RolController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $rolesFormatted
+                'data' => $roles
             ]);
 
         } catch (\Exception $e) {
@@ -94,6 +124,9 @@ class RolController extends Controller
                 'activo' => $request->activo ?? true
             ]);
 
+            // Registrar en bitácora
+            $this->registrarCreacion('roles', $rol->rol_id, "Rol: {$rol->nombre_rol}");
+
             return response()->json([
                 'success' => true,
                 'message' => 'Rol creado exitosamente',
@@ -126,16 +159,43 @@ class RolController extends Controller
                 ], 404);
             }
 
+            // Formatear la respuesta
+            $rolFormatted = [
+                'id' => $rol->rol_id,
+                'rol_id' => $rol->rol_id,
+                'nombre_rol' => $rol->nombre_rol,
+                'nombre' => $rol->nombre_rol, // Alias para compatibilidad
+                'descripcion' => $rol->descripcion,
+                'activo' => $rol->activo,
+                'usuarios_count' => $rol->usuarios_count,
+                'permisos_count' => $rol->permisos->count(),
+                'permisos' => $rol->permisos->map(function ($permiso) {
+                    return [
+                        'id' => $permiso->permiso_id,
+                        'permiso_id' => $permiso->permiso_id,
+                        'nombre_permiso' => $permiso->nombre_permiso,
+                        'descripcion' => $permiso->descripcion,
+                        'modulo' => $permiso->modulo,
+                        'accion' => $permiso->accion,
+                        'activo' => $permiso->activo
+                    ];
+                })->toArray(),
+                'created_at' => $rol->created_at,
+                'updated_at' => $rol->updated_at
+            ];
+
             return response()->json([
                 'success' => true,
-                'data' => $rol
+                'data' => $rolFormatted
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error al obtener rol: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
             return response()->json([
                 'success' => false,
-                'message' => 'Error al cargar rol'
+                'message' => 'Error al cargar rol',
+                'error' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
     }
@@ -178,6 +238,9 @@ class RolController extends Controller
                 'descripcion' => $request->descripcion,
                 'activo' => $request->activo ?? $rol->activo
             ]);
+
+            // Registrar en bitácora
+            $this->registrarEdicion('roles', $rol->rol_id, "Rol: {$rol->nombre_rol}");
 
             return response()->json([
                 'success' => true,
@@ -282,6 +345,9 @@ class RolController extends Controller
             }
 
             $rol->permisos()->sync($permisosData);
+
+            // Registrar en bitácora
+            $this->registrarAccion('roles', $rol->rol_id, 'ASIGNAR_PERMISOS', "Rol: {$rol->nombre_rol} - Permisos: " . count($request->permisos));
 
             return response()->json([
                 'success' => true,

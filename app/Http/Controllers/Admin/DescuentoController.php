@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Descuento;
 use App\Models\Inscripcion;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class DescuentoController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar descuentos con paginación
      */
@@ -135,6 +137,9 @@ class DescuentoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('descuento', $descuento->id, "Descuento: {$descuento->nombre} - {$descuento->descuento}%");
+
             return response()->json([
                 'success' => true,
                 'data' => $descuento->load(['inscripcion.estudiante', 'inscripcion.programa']),
@@ -176,9 +181,13 @@ class DescuentoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $descuentoActualizado = $descuento->fresh();
+            $this->registrarEdicion('descuento', $descuentoActualizado->id, "Descuento: {$descuentoActualizado->nombre} - {$descuentoActualizado->descuento}%");
+
             return response()->json([
                 'success' => true,
-                'data' => $descuento->load(['inscripcion.estudiante', 'inscripcion.programa']),
+                'data' => $descuentoActualizado->load(['inscripcion.estudiante', 'inscripcion.programa']),
                 'message' => 'Descuento actualizado exitosamente'
             ]);
         } catch (\Exception $e) {

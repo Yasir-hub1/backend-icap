@@ -5,12 +5,15 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Pago;
 use App\Models\Bitacora;
+use App\Traits\RegistraBitacora;
+use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class VerificacionPagoController extends Controller
 {
+    use RegistraBitacora, EnviaNotificaciones;
     /**
      * Lista pagos pendientes de verificación
      */
@@ -20,26 +23,37 @@ class VerificacionPagoController extends Controller
             $perPage = $request->input('per_page', 15);
             $search = $request->input('search', '');
             $metodo = $request->input('metodo', '');
+            $estudianteId = $request->input('estudiante_id', '');
 
-            $pagos = Pago::with([
+            $query = Pago::with([
                     'cuota.planPago.inscripcion.estudiante.usuario',
                     'cuota.planPago.inscripcion.programa.ramaAcademica',
                     'cuota.planPago.inscripcion.programa.tipoPrograma',
                     'cuota.planPago.inscripcion.programa.institucion'
-                ])
-                ->when($search, function ($query) use ($search) {
-                    $query->whereHas('cuota.planPago.inscripcion.estudiante', function ($q) use ($search) {
-                        $q->where('nombre', 'ILIKE', "%{$search}%")
-                          ->orWhere('apellido', 'ILIKE', "%{$search}%")
-                          ->orWhere('ci', 'ILIKE', "%{$search}%")
-                          ->orWhere('registro_estudiante', 'ILIKE', "%{$search}%");
-                    });
-                })
-                ->when($metodo, function ($query) use ($metodo) {
-                    $query->where('metodo', $metodo);
-                })
-                ->orderBy('fecha', 'desc')
-                ->paginate($perPage);
+                ]);
+
+            if ($search) {
+                $query->whereHas('cuota.planPago.inscripcion.estudiante', function ($q) use ($search) {
+                    $q->where('nombre', 'ILIKE', "%{$search}%")
+                      ->orWhere('apellido', 'ILIKE', "%{$search}%")
+                      ->orWhere('ci', 'ILIKE', "%{$search}%")
+                      ->orWhere('registro_estudiante', 'ILIKE', "%{$search}%");
+                });
+            }
+
+            if ($metodo) {
+                $query->where('metodo', 'ILIKE', $metodo);
+            }
+
+            if ($estudianteId) {
+                // Convertir a entero para asegurar que sea numérico
+                $estudianteId = (int) $estudianteId;
+                $query->whereHas('cuota.planPago.inscripcion', function ($q) use ($estudianteId) {
+                    $q->where('estudiante_id', $estudianteId);
+                });
+            }
+
+            $pagos = $query->orderBy('fecha', 'desc')->paginate($perPage);
 
             $pagos->getCollection()->transform(function ($pago) {
                 $planPago = $pago->cuota->planPago;
@@ -217,15 +231,14 @@ class VerificacionPagoController extends Controller
 
             // Registrar en bitácora
             if ($estudiante && $programa) {
-                $adminNombre = $admin->nombre ?? $admin->persona->nombre ?? 'Admin';
-                $adminApellido = $admin->apellido ?? $admin->persona->apellido ?? '';
-                Bitacora::create([
-                    'fecha' => now()->toDateString(),
-                    'tabla' => 'pagos',
-                    'codTabla' => $pago->id,
-                    'transaccion' => "Pago de {$pago->monto} Bs del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) para el programa '{$programa->nombre}' fue VERIFICADO Y APROBADO por {$adminNombre} {$adminApellido}",
-                    'usuario_id' => $admin->usuario_id ?? $admin->id ?? auth()->id()
-                ]);
+                $descripcion = "Pago de {$pago->monto} Bs del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) para el programa '{$programa->nombre}'";
+                $this->registrarAccion('pagos', $pago->id, 'APROBAR', $descripcion);
+            }
+
+            // Enviar notificación al estudiante
+            if ($estudiante) {
+                $concepto = $programa ? "Pago para el programa '{$programa->nombre}'" : "Pago de cuota";
+                $this->notificarPagoRegistrado($estudiante, $pago->monto, $concepto, $pago->id, true);
             }
 
             DB::commit();
@@ -296,6 +309,11 @@ class VerificacionPagoController extends Controller
                     'transaccion' => "Pago de {$pagoData['monto']} Bs del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) para el programa '{$programa->nombre}' fue RECHAZADO por {$adminNombre} {$adminApellido}. Motivo: {$request->motivo}",
                     'usuario_id' => $admin->usuario_id ?? $admin->id ?? auth()->id()
                 ]);
+            }
+
+            // Enviar notificación al estudiante
+            if ($estudiante) {
+                $this->notificarPagoRechazado($estudiante, $pagoData['monto'], $request->motivo, $pagoData['id']);
             }
 
             DB::commit();

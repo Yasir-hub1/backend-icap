@@ -8,6 +8,8 @@ use App\Models\Documento;
 use App\Models\Notificacion;
 use App\Models\EstadoEstudiante;
 use App\Helpers\CodigoHelper;
+use App\Traits\RegistraBitacora;
+use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -16,6 +18,7 @@ use Carbon\Carbon;
 
 class EstudianteController extends Controller
 {
+    use RegistraBitacora, EnviaNotificaciones;
     /**
      * Alias para mantener compatibilidad con rutas RESTful
      */
@@ -61,7 +64,8 @@ class EstudianteController extends Controller
             // Agregar información adicional
             $estudiantes->getCollection()->transform(function ($estudiante) {
                 return [
-                    'id' => $estudiante->registro_estudiante,
+                    'id' => $estudiante->id, // ID real del estudiante (persona_id), usado en inscripcion.estudiante_id
+                    'persona_id' => $estudiante->id, // Alias para claridad
                     'ci' => $estudiante->ci,
                     'nombre' => $estudiante->nombre,
                     'apellido' => $estudiante->apellido,
@@ -279,6 +283,9 @@ class EstudianteController extends Controller
             // Crear estudiante (que hereda de Persona)
             $estudiante = Estudiante::create($datosCrear);
 
+            // Registrar en bitácora
+            $this->registrarCreacion('estudiante', $estudiante->id, "Estudiante: {$estudiante->nombre} {$estudiante->apellido} - CI: {$estudiante->ci}");
+
             Log::info('Estudiante creado desde admin', [
                 'id' => $estudiante->id,
                 'registro_estudiante' => $estudiante->registro_estudiante,
@@ -374,6 +381,9 @@ class EstudianteController extends Controller
 
             if (!empty($datosActualizar)) {
                 $estudiante->update($datosActualizar);
+                
+                // Registrar en bitácora
+                $this->registrarEdicion('estudiante', $estudiante->id, "Estudiante: {$estudiante->nombre} {$estudiante->apellido} - CI: {$estudiante->ci}");
             }
 
             return response()->json([
@@ -478,9 +488,11 @@ class EstudianteController extends Controller
             // Cambiar estado a activo (asumiendo que 2 es "Activo")
             $estudiante->update(['Estado_id' => 2]);
 
-            // Crear notificación para el estudiante
-            $this->crearNotificacionEstudiante($estudiante, 'Perfil Verificado',
-                'Tu perfil ha sido verificado exitosamente. Ahora puedes inscribirte a los programas disponibles.');
+            // Registrar en bitácora
+            $this->registrarAccion('estudiante', $estudiante->id, 'ACTIVAR', "Estudiante: {$estudiante->nombre} {$estudiante->apellido} - CI: {$estudiante->ci}");
+
+            // Enviar notificación al estudiante
+            $this->notificarEstudianteActivado($estudiante);
 
             return response()->json([
                 'success' => true,
@@ -634,6 +646,11 @@ class EstudianteController extends Controller
                 ], 422);
             }
 
+            // Guardar datos para bitácora antes de eliminar
+            $nombreCompleto = "{$estudiante->nombre} {$estudiante->apellido}";
+            $ci = $estudiante->ci;
+            $estudianteId = $estudiante->id;
+
             // Eliminar usuario asociado si existe
             if ($estudiante->usuario) {
                 $estudiante->usuario->delete();
@@ -642,9 +659,12 @@ class EstudianteController extends Controller
             // Eliminar el estudiante (esto también eliminará los registros en persona por herencia)
             $estudiante->delete();
 
+            // Registrar en bitácora
+            $this->registrarEliminacion('estudiante', $estudianteId, "Estudiante: {$nombreCompleto} - CI: {$ci}");
+
             Log::info('Estudiante eliminado', [
                 'registro_estudiante' => $id,
-                'ci' => $estudiante->ci
+                'ci' => $ci
             ]);
 
             return response()->json([

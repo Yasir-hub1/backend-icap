@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Inscripcion;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,7 @@ use Carbon\Carbon;
 
 class InscripcionController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar inscripciones con filtros
      */

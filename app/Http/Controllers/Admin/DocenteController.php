@@ -7,6 +7,7 @@ use App\Models\Docente;
 use App\Models\Persona;
 use App\Models\Grupo;
 use App\Helpers\CodigoHelper;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 
 class DocenteController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar docentes con paginación
      */
@@ -91,12 +93,8 @@ class DocenteController extends Controller
                         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
             }
 
-            // Cargar relaciones usando el registro_docente correcto
-            // Cargar grupos directamente con una consulta explícita para evitar problemas de tipo
-            $registroDocente = $docente->registro_docente;
-
-            // Cargar grupos manualmente usando el registro_docente (string)
-            $grupos = Grupo::where('registro_docente', $registroDocente)
+            // Cargar grupos usando la relación correcta (docente_id)
+            $grupos = Grupo::where('docente_id', $docente->id)
                 ->with(['programa', 'modulo', 'horarios'])
                 ->get();
 
@@ -255,6 +253,9 @@ class DocenteController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('docente', $docente->id, "Docente: {$docente->nombre} {$docente->apellido} - Registro: {$docente->registro_docente}");
+
             return response()->json([
                 'success' => true,
                 'data' => $docente,
@@ -341,9 +342,13 @@ class DocenteController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $docenteActualizado = $docente->fresh();
+            $this->registrarEdicion('docente', $docenteActualizado->id, "Docente: {$docenteActualizado->nombre} {$docenteActualizado->apellido} - Registro: {$docenteActualizado->registro_docente}");
+
             return response()->json([
                 'success' => true,
-                'data' => $docente->fresh(),
+                'data' => $docenteActualizado,
                 'message' => 'Docente actualizado exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -391,9 +396,8 @@ class DocenteController extends Controller
                         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
             }
 
-            // Verificar si tiene grupos usando el registro_docente directamente
-            $registroDocente = $docente->registro_docente;
-            $tieneGrupos = Grupo::where('registro_docente', $registroDocente)->exists();
+            // Verificar si tiene grupos usando docente_id
+            $tieneGrupos = Grupo::where('docente_id', $docente->id)->exists();
 
             if ($tieneGrupos) {
                 return response()->json([
@@ -406,11 +410,19 @@ class DocenteController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar información antes de eliminar para bitácora
+            $docenteNombre = "{$docente->nombre} {$docente->apellido}";
+            $docenteRegistro = $docente->registro_docente;
+            $docenteId = $docente->id;
+
             // Eliminar Persona (cascada eliminará Docente)
             $persona = Persona::findOrFail($docente->id);
             $persona->delete();
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('docente', $docenteId, "Docente: {$docenteNombre} - Registro: {$docenteRegistro}");
 
             return response()->json([
                 'success' => true,

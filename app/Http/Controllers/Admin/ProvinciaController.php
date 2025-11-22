@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Provincia;
 use App\Models\Pais;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 
 class ProvinciaController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar provincias con paginación
      */

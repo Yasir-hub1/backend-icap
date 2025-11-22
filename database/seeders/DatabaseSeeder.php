@@ -26,13 +26,13 @@ class DatabaseSeeder extends Seeder
 
         $this->command->info('📋 Paso 1/3: Creando permisos del sistema...');
         $this->call([
-            PermisosSeeder::class,
+            PermisoSeeder::class,
         ]);
 
         $this->command->info('');
         $this->command->info('👥 Paso 2/3: Creando roles y asignando permisos...');
         $this->call([
-            RolesSeeder::class,
+            RolSeeder::class,
         ]);
 
         $this->command->info('');
@@ -40,7 +40,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             TipoProgramaSeeder::class,
             EstadoEstudianteSeeder::class,
-            AdminUserSeeder::class,
+            UsuarioAdminSeeder::class,
         ]);
 
         $this->command->info('');

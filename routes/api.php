@@ -226,9 +226,9 @@ Route::middleware(['auth:api', 'role:ADMIN'])->prefix('admin')->group(function (
 
     // Bitácora
     Route::prefix('bitacora')->group(function () {
-        Route::get('/', [\App\Http\Controllers\Api\BitacoraController::class, 'index'])->middleware('permission:usuarios_ver');
-        Route::get('/{id}', [\App\Http\Controllers\Api\BitacoraController::class, 'show'])->middleware('permission:usuarios_ver');
-        Route::get('/estadisticas', [\App\Http\Controllers\Api\BitacoraController::class, 'estadisticas'])->middleware('permission:usuarios_ver');
+        Route::get('/', [\App\Http\Controllers\Api\BitacoraController::class, 'index'])->middleware('permission:bitacora_ver');
+        Route::get('/estadisticas', [\App\Http\Controllers\Api\BitacoraController::class, 'estadisticas'])->middleware('permission:bitacora_ver');
+        Route::get('/{id}', [\App\Http\Controllers\Api\BitacoraController::class, 'show'])->middleware('permission:bitacora_ver');
     });
 
     // Gestión de estudiantes
@@ -397,12 +397,12 @@ Route::middleware(['auth:api', 'role:ADMIN'])->prefix('admin')->group(function (
     // Gestión de asignación de docentes y grupos
     // Docentes
     Route::prefix('docentes')->group(function () {
-        Route::get('/siguiente-registro', [\App\Http\Controllers\Admin\DocenteController::class, 'siguienteRegistro'])->middleware('permission:grupos_ver');
-        Route::get('/', [\App\Http\Controllers\Admin\DocenteController::class, 'listar'])->middleware('permission:grupos_ver');
-        Route::post('/', [\App\Http\Controllers\Admin\DocenteController::class, 'crear'])->middleware('permission:grupos_crear');
-        Route::get('/{registro}', [\App\Http\Controllers\Admin\DocenteController::class, 'obtener'])->middleware('permission:grupos_ver');
-        Route::put('/{registro}', [\App\Http\Controllers\Admin\DocenteController::class, 'actualizar'])->middleware('permission:grupos_editar');
-        Route::delete('/{registro}', [\App\Http\Controllers\Admin\DocenteController::class, 'eliminar'])->middleware('permission:grupos_eliminar');
+        Route::get('/siguiente-registro', [\App\Http\Controllers\Admin\DocenteController::class, 'siguienteRegistro'])->middleware('permission:docentes_ver');
+        Route::get('/', [\App\Http\Controllers\Admin\DocenteController::class, 'listar'])->middleware('permission:docentes_ver');
+        Route::post('/', [\App\Http\Controllers\Admin\DocenteController::class, 'crear'])->middleware('permission:docentes_crear');
+        Route::get('/{registro}', [\App\Http\Controllers\Admin\DocenteController::class, 'obtener'])->middleware('permission:docentes_ver');
+        Route::put('/{registro}', [\App\Http\Controllers\Admin\DocenteController::class, 'actualizar'])->middleware('permission:docentes_editar');
+        Route::delete('/{registro}', [\App\Http\Controllers\Admin\DocenteController::class, 'eliminar'])->middleware('permission:docentes_eliminar');
     });
 
     // Horarios
@@ -473,23 +473,23 @@ Route::middleware(['auth:api', 'role:ADMIN,DOCENTE'])->prefix('personal')->group
 | Mantener para compatibilidad con frontend existente
 */
 
-// Notificaciones - Requiere autenticación
-Route::middleware(['role:ESTUDIANTE,ADMIN,DOCENTE'])->prefix('notificaciones')->group(function () {
-    Route::get('/', [NotificacionController::class, 'index']);
-    Route::get('/contador', [NotificacionController::class, 'contador']);
-    Route::get('/no-leidas', [NotificacionController::class, 'contador']); // Alias para compatibilidad
-    Route::get('/estadisticas', [NotificacionController::class, 'estadisticas']);
-    Route::put('/{id}/marcar-leida', [NotificacionController::class, 'marcarLeida']);
-    Route::put('/{id}/leida', [NotificacionController::class, 'marcarLeida']); // Alias para compatibilidad
-    Route::put('/marcar-todas-leidas', [NotificacionController::class, 'marcarTodasLeidas']);
-    Route::put('/todas/leidas', [NotificacionController::class, 'marcarTodasLeidas']); // Alias para compatibilidad
-    Route::delete('/{id}', [NotificacionController::class, 'destroy']);
+// Notificaciones - Requiere autenticación y permisos
+Route::middleware(['auth:api'])->prefix('notificaciones')->group(function () {
+    Route::get('/', [NotificacionController::class, 'index'])->middleware('permission:notificaciones_ver');
+    Route::get('/contador', [NotificacionController::class, 'contador'])->middleware('permission:notificaciones_ver');
+    Route::get('/no-leidas', [NotificacionController::class, 'contador'])->middleware('permission:notificaciones_ver'); // Alias para compatibilidad
+    Route::get('/estadisticas', [NotificacionController::class, 'estadisticas'])->middleware('permission:notificaciones_ver');
+    Route::put('/{id}/marcar-leida', [NotificacionController::class, 'marcarLeida'])->middleware('permission:notificaciones_editar');
+    Route::put('/{id}/leida', [NotificacionController::class, 'marcarLeida'])->middleware('permission:notificaciones_editar'); // Alias para compatibilidad
+    Route::put('/marcar-todas-leidas', [NotificacionController::class, 'marcarTodasLeidas'])->middleware('permission:notificaciones_editar');
+    Route::put('/todas/leidas', [NotificacionController::class, 'marcarTodasLeidas'])->middleware('permission:notificaciones_editar'); // Alias para compatibilidad
+    Route::delete('/{id}', [NotificacionController::class, 'destroy'])->middleware('permission:notificaciones_eliminar');
 });
 
 // Notificaciones - Solo para administradores (crear y enviar masivas)
-Route::middleware(['auth:api', 'role:ADMIN'])->prefix('notificaciones')->group(function () {
-    Route::post('/', [NotificacionController::class, 'store']);
-    Route::post('/masiva', [NotificacionController::class, 'enviarMasiva']);
+Route::middleware(['auth:api'])->prefix('notificaciones')->group(function () {
+    Route::post('/', [NotificacionController::class, 'store'])->middleware('permission:notificaciones_crear');
+    Route::post('/masiva', [NotificacionController::class, 'enviarMasiva'])->middleware('permission:notificaciones_crear');
 });
 
 // Test route for debugging

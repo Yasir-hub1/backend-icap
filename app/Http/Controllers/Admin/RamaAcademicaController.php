@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\RamaAcademica;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class RamaAcademicaController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar ramas académicas con paginación
      */

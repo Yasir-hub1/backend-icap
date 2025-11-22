@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Institucion;
 use App\Models\Ciudad;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 
 class InstitucionController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar instituciones con paginación
      */
@@ -115,6 +117,9 @@ class InstitucionController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('institucion', $institucion->id, "Institución: {$institucion->nombre}");
+
             return response()->json([
                 'success' => true,
                 'data' => $institucion->load(['ciudad.provincia.pais']),
@@ -164,9 +169,13 @@ class InstitucionController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $institucionActualizada = $institucion->fresh();
+            $this->registrarEdicion('institucion', $institucionActualizada->id, "Institución: {$institucionActualizada->nombre}");
+
             return response()->json([
                 'success' => true,
-                'data' => $institucion->load(['ciudad.provincia.pais']),
+                'data' => $institucionActualizada->load(['ciudad.provincia.pais']),
                 'message' => 'Institución actualizada exitosamente'
             ]);
         } catch (\Exception $e) {

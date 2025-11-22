@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Modulo;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class ModuloController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar módulos con paginación
      */
@@ -124,6 +126,9 @@ class ModuloController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('modulo', $modulo->modulo_id, "Módulo: {$modulo->nombre}");
+
             return response()->json([
                 'success' => true,
                 'data' => $modulo,
@@ -195,9 +200,13 @@ class ModuloController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $moduloActualizado = $modulo->fresh();
+            $this->registrarEdicion('modulo', $moduloActualizado->modulo_id, "Módulo: {$moduloActualizado->nombre}");
+
             return response()->json([
                 'success' => true,
-                'data' => $modulo,
+                'data' => $moduloActualizado,
                 'message' => 'Módulo actualizado exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')

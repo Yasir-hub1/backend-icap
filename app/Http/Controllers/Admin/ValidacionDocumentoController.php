@@ -6,12 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
 use App\Models\Documento;
 use App\Models\Bitacora;
+use App\Traits\RegistraBitacora;
+use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class ValidacionDocumentoController extends Controller
 {
+    use RegistraBitacora, EnviaNotificaciones;
     /**
      * Lista estudiantes con Estado_id=3 (documentos pendientes de validación)
      *
@@ -162,18 +165,16 @@ class ValidacionDocumentoController extends Controller
             $documento->save();
 
             // Registrar en bitácora
-            $authUser = $request->auth_user ?? auth('api')->user();
             $persona = $documento->persona;
             $estudiante = $persona ? \App\Models\Estudiante::find($persona->id) : null;
-            
-            if ($authUser && isset($authUser->usuario_id)) {
-                Bitacora::create([
-                    'fecha' => now()->toDateString(),
-                    'tabla' => 'documento',
-                    'codTabla' => $documento->documento_id,
-                    'transaccion' => "Documento '{$documento->tipoDocumento->nombre_entidad}' del estudiante " . ($estudiante ? "{$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" : ($persona ? "{$persona->nombre} {$persona->apellido} (CI: {$persona->ci})" : "ID: {$persona->id}")) . " fue APROBADO",
-                    'usuario_id' => $authUser->usuario_id
-                ]);
+            $descripcion = "Documento '{$documento->tipoDocumento->nombre_entidad}' del estudiante " .
+                ($estudiante ? "{$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" :
+                ($persona ? "{$persona->nombre} {$persona->apellido} (CI: {$persona->ci})" : "ID: {$persona->id}")) . " fue APROBADO";
+            $this->registrarAccion('documento', $documento->documento_id, 'APROBAR', $descripcion);
+
+            // Enviar notificación al estudiante
+            if ($estudiante) {
+                $this->notificarDocumentoAprobado($estudiante, $documento->tipoDocumento->nombre_entidad ?? 'Documento');
             }
 
             DB::commit();
@@ -248,19 +249,18 @@ class ValidacionDocumentoController extends Controller
                 'convenio_id' => $documento->convenio_id
             ]);
 
-            // Registrar en bitácora
-            $authUser = $request->auth_user ?? auth('api')->user();
+            // Registrar rechazo en bitácora
             $persona = $documento->persona;
             $estudiante = $persona ? \App\Models\Estudiante::find($persona->id) : null;
+            $descripcion = "Documento '{$documento->tipoDocumento->nombre_entidad}' del estudiante " .
+                ($estudiante ? "{$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" :
+                ($persona ? "{$persona->nombre} {$persona->apellido} (CI: {$persona->ci})" : "ID: {$persona->id}")) .
+                " fue RECHAZADO. Motivo: {$request->motivo}. Nueva versión {$nuevaVersion} creada.";
+            $this->registrarAccion('documento', $documento->documento_id, 'RECHAZAR', $descripcion);
 
-            if ($authUser && isset($authUser->usuario_id)) {
-                Bitacora::create([
-                    'fecha' => now()->toDateString(),
-                    'tabla' => 'Documento',
-                    'codTabla' => $documento->documento_id,
-                    'transaccion' => "Documento '{$documento->tipoDocumento->nombre_entidad}' del estudiante " . ($estudiante ? "{$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci})" : ($persona ? "{$persona->nombre} {$persona->apellido} (CI: {$persona->ci})" : "ID: {$persona->id}")) . " fue RECHAZADO. Motivo: {$request->motivo}. Nueva versión {$nuevaVersion} creada.",
-                    'usuario_id' => $authUser->usuario_id
-                ]);
+            // Enviar notificación al estudiante
+            if ($estudiante) {
+                $this->notificarDocumentoRechazado($estudiante, $documento->tipoDocumento->nombre_entidad ?? 'Documento', $request->motivo);
             }
 
             DB::commit();
@@ -338,24 +338,27 @@ class ValidacionDocumentoController extends Controller
                 $documento->observaciones = 'Aprobado en validación masiva';
                 $documento->save();
                 $documentosAprobados[] = $documento;
+
+                // Registrar en bitácora cada aprobación
+                $personaDoc = $documento->persona;
+                $estudianteDoc = $personaDoc ? \App\Models\Estudiante::find($personaDoc->id) : null;
+                $descripcionDoc = "Documento '{$documento->tipoDocumento->nombre_entidad}' del estudiante " .
+                    ($estudianteDoc ? "{$estudianteDoc->nombre} {$estudianteDoc->apellido} (CI: {$estudianteDoc->ci})" :
+                    ($personaDoc ? "{$personaDoc->nombre} {$personaDoc->apellido} (CI: {$personaDoc->ci})" : "ID: {$personaDoc->id}")) .
+                    " fue APROBADO en validación masiva";
+                $this->registrarAccion('documento', $documento->documento_id, 'APROBAR', $descripcionDoc);
             }
 
             // Cambiar estado del estudiante a 4 (Documentos aprobados / Apto para inscripción)
             $estudiante->estado_id = 4;
             $estudiante->save();
 
-            // Registrar en bitácora
-            $authUser = $request->auth_user ?? auth('api')->user();
+            // Registrar en bitácora - cambio de estado del estudiante
+            $descripcion = "Todos los documentos del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) fueron APROBADOS. Estado cambiado a 'Apto para inscripción' (Estado_id=4). Total documentos aprobados: " . count($documentosAprobados);
+            $this->registrarAccion('estudiante', $estudiante->id, 'APROBAR_DOCUMENTOS', $descripcion);
 
-            if ($authUser && isset($authUser->usuario_id)) {
-                Bitacora::create([
-                    'fecha' => now()->toDateString(),
-                    'tabla' => 'Estudiante',
-                    'codTabla' => $estudiante->id,
-                    'transaccion' => "Todos los documentos del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) fueron APROBADOS. Estado cambiado a 'Apto para inscripción' (Estado_id=4). Total documentos aprobados: " . count($documentosAprobados),
-                    'usuario_id' => $authUser->usuario_id
-                ]);
-            }
+            // Enviar notificación al estudiante
+            $this->notificarDocumentosCompletos($estudiante);
 
             DB::commit();
 

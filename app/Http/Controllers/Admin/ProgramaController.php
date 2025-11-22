@@ -9,6 +9,7 @@ use App\Models\Version;
 use App\Models\TipoPrograma;
 use App\Models\Modulo;
 use App\Models\Institucion;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -17,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 
 class ProgramaController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar programas con paginación y filtros
      */
@@ -194,6 +196,9 @@ class ProgramaController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('programa', $programa->id, "Programa: {$programa->nombre}");
+
             return response()->json([
                 'success' => true,
                 'data' => $programa->load(['ramaAcademica', 'tipoPrograma', 'version', 'institucion', 'modulos', 'subprogramas']),
@@ -298,6 +303,9 @@ class ProgramaController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarEdicion('programa', $programa->id, "Programa: {$programa->nombre}");
+
             return response()->json([
                 'success' => true,
                 'data' => $programa->load(['ramaAcademica', 'tipoPrograma', 'version', 'institucion', 'modulos', 'subprogramas']),
@@ -366,6 +374,10 @@ class ProgramaController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar datos para bitácora antes de eliminar
+            $nombrePrograma = $programa->nombre;
+            $programaId = $programa->id;
+
             // Desasociar módulos y subprogramas
             $programa->modulos()->detach();
             $programa->subprogramas()->detach();
@@ -378,6 +390,9 @@ class ProgramaController extends Controller
             Cache::forget('catalogos_ramas_academicas');
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('programa', $programaId, "Programa: {$nombrePrograma}");
 
             return response()->json([
                 'success' => true,

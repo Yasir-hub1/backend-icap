@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Usuario;
 use App\Models\Persona;
 use App\Models\Rol;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 
 class UsuarioController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar usuarios con paginación
      */
@@ -220,6 +222,9 @@ class UsuarioController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarCreacion('usuario', $usuario->usuario_id, "Usuario: {$usuario->email}");
+
             $usuario->load(['persona', 'rol']);
             unset($usuario->password);
 
@@ -382,6 +387,9 @@ class UsuarioController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $this->registrarEdicion('usuario', $usuario->usuario_id, "Usuario: {$usuario->email}");
+
             $usuario->load(['persona', 'rol']);
             unset($usuario->password);
 
@@ -437,11 +445,18 @@ class UsuarioController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar datos antes de eliminar para bitácora
+            $email = $usuario->email;
+            $usuarioId = $usuario->usuario_id;
+
             // En lugar de eliminar, podríamos desactivar el usuario
             // Por ahora, eliminamos físicamente
             $usuario->delete();
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('usuario', $usuarioId, "Usuario: {$email}");
 
             return response()->json([
                 'success' => true,

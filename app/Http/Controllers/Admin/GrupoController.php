@@ -8,6 +8,7 @@ use App\Models\Programa;
 use App\Models\Modulo;
 use App\Models\Docente;
 use App\Models\Horario;
+use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -16,6 +17,7 @@ use Illuminate\Support\Facades\Log;
 
 class GrupoController extends Controller
 {
+    use RegistraBitacora;
     /**
      * Listar grupos con paginación
      */
@@ -62,7 +64,20 @@ class GrupoController extends Controller
                 $query->where('docente_id', $docenteId);
             }
 
-            $grupos = $query->orderBy('fecha_ini', 'desc')
+            // Ordenamiento
+            $sortBy = $request->get('sort_by', 'fecha_ini');
+            $sortDirection = $request->get('sort_direction', 'desc');
+            
+            // Validar que sort_by sea una columna válida
+            $allowedSortColumns = ['fecha_ini', 'fecha_fin', 'grupo_id', 'id', 'created_at'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'fecha_ini';
+            }
+            
+            // Validar dirección de ordenamiento
+            $sortDirection = strtolower($sortDirection) === 'asc' ? 'asc' : 'desc';
+            
+            $grupos = $query->orderBy($sortBy, $sortDirection)
                            ->paginate($perPage);
 
             return response()->json([
@@ -199,6 +214,10 @@ class GrupoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $programaNombre = $grupo->programa ? $grupo->programa->nombre : 'N/A';
+            $this->registrarCreacion('grupo', $grupo->id, "Grupo ID: {$grupo->id} - Programa: {$programaNombre}");
+
             return response()->json([
                 'success' => true,
                 'data' => $grupo->load(['programa', 'modulo', 'docente', 'horarios']),
@@ -303,6 +322,10 @@ class GrupoController extends Controller
 
             DB::commit();
 
+            // Registrar en bitácora
+            $programaNombre = $grupo->programa ? $grupo->programa->nombre : 'N/A';
+            $this->registrarEdicion('grupo', $grupo->id, "Grupo ID: {$grupo->id} - Programa: {$programaNombre}");
+
             return response()->json([
                 'success' => true,
                 'data' => $grupo->load(['programa', 'modulo', 'docente', 'horarios']),
@@ -361,12 +384,19 @@ class GrupoController extends Controller
 
             DB::beginTransaction();
 
+            // Guardar datos para bitácora antes de eliminar
+            $grupoId = $grupo->id;
+            $programaNombre = $grupo->programa ? $grupo->programa->nombre : 'N/A';
+
             // Desasociar horarios
             $grupo->horarios()->detach();
 
             $grupo->delete();
 
             DB::commit();
+
+            // Registrar en bitácora
+            $this->registrarEliminacion('grupo', $grupoId, "Grupo ID: {$grupoId} - Programa: {$programaNombre}");
 
             return response()->json([
                 'success' => true,
