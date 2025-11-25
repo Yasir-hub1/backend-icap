@@ -127,6 +127,34 @@ class NotificacionController extends Controller
 
             $notificaciones = $query->paginate($request->get('per_page', 20));
 
+            // Transformar las notificaciones para incluir campos formateados
+            $notificaciones->getCollection()->transform(function ($notificacion) {
+                // Asegurar que las fechas estén en la zona horaria correcta
+                $fechaEnvio = $notificacion->fecha_envio ? 
+                    \Carbon\Carbon::parse($notificacion->fecha_envio)->setTimezone(config('app.timezone', 'America/La_Paz')) : null;
+                $fechaLectura = $notificacion->fecha_lectura ? 
+                    \Carbon\Carbon::parse($notificacion->fecha_lectura)->setTimezone(config('app.timezone', 'America/La_Paz')) : null;
+                
+                return [
+                    'id' => $notificacion->id,
+                    'titulo' => $notificacion->titulo,
+                    'mensaje' => $notificacion->mensaje,
+                    'tipo' => $notificacion->tipo,
+                    'leida' => $notificacion->leida,
+                    'usuario_id' => $notificacion->usuario_id,
+                    'usuario_tipo' => $notificacion->usuario_tipo,
+                    'datos_adicionales' => $notificacion->datos_adicionales,
+                    'fecha_envio' => $fechaEnvio ? $fechaEnvio->toIso8601String() : null,
+                    'fecha_lectura' => $fechaLectura ? $fechaLectura->toIso8601String() : null,
+                    // Campos para compatibilidad con frontend
+                    'created_at' => $fechaEnvio ? $fechaEnvio->toIso8601String() : null,
+                    'leida_at' => $fechaLectura ? $fechaLectura->toIso8601String() : null,
+                    // Fecha formateada para mostrar
+                    'fecha_formateada' => $fechaEnvio ? $fechaEnvio->format('d/m/Y H:i:s') : null,
+                    'fecha_lectura_formateada' => $fechaLectura ? $fechaLectura->format('d/m/Y H:i:s') : null
+                ];
+            });
+
             // Obtener contador de no leídas
             $noLeidas = Notificacion::porUsuario($usuarioId, $usuarioTipo)
                                    ->noLeidas()
@@ -214,11 +242,30 @@ class NotificacionController extends Controller
                                        ->findOrFail($id);
 
             $notificacion->marcarComoLeida();
+            $notificacion->refresh(); // Recargar para obtener fecha_lectura actualizada
+            
+            // Asegurar que las fechas estén en la zona horaria correcta
+            $fechaEnvio = $notificacion->fecha_envio ? 
+                \Carbon\Carbon::parse($notificacion->fecha_envio)->setTimezone(config('app.timezone', 'America/La_Paz')) : null;
+            $fechaLectura = $notificacion->fecha_lectura ? 
+                \Carbon\Carbon::parse($notificacion->fecha_lectura)->setTimezone(config('app.timezone', 'America/La_Paz')) : null;
 
             return response()->json([
                 'success' => true,
                 'message' => 'Notificación marcada como leída',
-                'data' => $notificacion
+                'data' => [
+                    'id' => $notificacion->id,
+                    'titulo' => $notificacion->titulo,
+                    'mensaje' => $notificacion->mensaje,
+                    'tipo' => $notificacion->tipo,
+                    'leida' => $notificacion->leida,
+                    'fecha_envio' => $fechaEnvio ? $fechaEnvio->toIso8601String() : null,
+                    'fecha_lectura' => $fechaLectura ? $fechaLectura->toIso8601String() : null,
+                    'created_at' => $fechaEnvio ? $fechaEnvio->toIso8601String() : null,
+                    'leida_at' => $fechaLectura ? $fechaLectura->toIso8601String() : null,
+                    'fecha_formateada' => $fechaEnvio ? $fechaEnvio->format('d/m/Y H:i:s') : null,
+                    'fecha_lectura_formateada' => $fechaLectura ? $fechaLectura->format('d/m/Y H:i:s') : null
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -245,11 +292,14 @@ class NotificacionController extends Controller
                 ], 401);
             }
 
+            // Asegurar que la fecha esté en la zona horaria correcta
+            $fechaLectura = \Carbon\Carbon::now()->setTimezone(config('app.timezone', 'America/La_Paz'));
+            
             $actualizadas = Notificacion::porUsuario($usuarioId, $usuarioTipo)
                                        ->noLeidas()
                                        ->update([
                                            'leida' => true,
-                                           'fecha_lectura' => now()
+                                           'fecha_lectura' => $fechaLectura
                                        ]);
 
             return response()->json([

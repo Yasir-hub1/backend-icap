@@ -31,6 +31,18 @@ class Notificacion extends Model
         'fecha_lectura' => 'datetime'
     ];
 
+    // Accessor para compatibilidad con frontend que espera created_at
+    public function getCreatedAtAttribute()
+    {
+        return $this->fecha_envio;
+    }
+
+    // Accessor para fecha formateada
+    public function getFechaFormateadaAttribute()
+    {
+        return $this->fecha_envio ? $this->fecha_envio->format('Y-m-d H:i:s') : null;
+    }
+
     // Relaciones
     public function usuario()
     {
@@ -73,9 +85,12 @@ class Notificacion extends Model
     // Métodos
     public function marcarComoLeida()
     {
+        // Asegurar que la fecha esté en la zona horaria correcta
+        $fechaLectura = \Carbon\Carbon::now()->setTimezone(config('app.timezone', 'America/La_Paz'));
+        
         $this->update([
             'leida' => true,
-            'fecha_lectura' => now()
+            'fecha_lectura' => $fechaLectura
         ]);
     }
 
@@ -114,6 +129,10 @@ class Notificacion extends Model
     // Métodos estáticos para crear notificaciones
     public static function crearNotificacion($usuarioId, $usuarioTipo, $titulo, $mensaje, $tipo = 'info', $datosAdicionales = null)
     {
+        // Asegurar que la fecha esté en la zona horaria correcta
+        // Usar la zona horaria configurada en la aplicación o 'America/La_Paz' como fallback
+        $fechaEnvio = \Carbon\Carbon::now()->setTimezone(config('app.timezone', 'America/La_Paz'));
+        
         return self::create([
             'titulo' => $titulo,
             'mensaje' => $mensaje,
@@ -122,7 +141,7 @@ class Notificacion extends Model
             'usuario_id' => $usuarioId,
             'usuario_tipo' => $usuarioTipo,
             'datos_adicionales' => $datosAdicionales,
-            'fecha_envio' => now()
+            'fecha_envio' => $fechaEnvio
         ]);
     }
 
