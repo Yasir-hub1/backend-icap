@@ -20,13 +20,12 @@ class Persona extends Model
         'sexo',
         'fecha_nacimiento',
         'direccion',
-        'fotografia',
-        'usuario_id'
+        'fotografia'
+        // NO incluir usuario_id aquí - la relación es inversa: usuario tiene persona_id
     ];
 
     protected $casts = [
         'id' => 'integer',
-        'usuario_id' => 'integer',
         'fecha_nacimiento' => 'date'
     ];
 

@@ -69,8 +69,9 @@ Route::prefix('auth')->group(function () {
 
     // Rutas protegidas (requieren JWT)
     // Perfil puede ser accedido por cualquier usuario autenticado (estudiante, admin, docente)
-    // Usar auth:api para permitir tanto estudiantes como usuarios admin/docente
-    Route::middleware(['auth:api'])->group(function () {
+    // Usar middleware personalizado que maneje tanto estudiantes como usuarios admin/docente
+    // No usar auth:api porque solo funciona con Usuario, no con Estudiante
+    Route::middleware([\App\Http\Middleware\JwtVerifyMiddleware::class])->group(function () {
         Route::get('/perfil', [AutenticacionEstudianteController::class, 'obtenerPerfil']);
     });
 
@@ -86,8 +87,8 @@ Route::prefix('auth')->group(function () {
 |--------------------------------------------------------------------------
 | Requiere autenticación JWT y rol ESTUDIANTE
 */
-// Rutas de estudiante - usar solo role middleware ya que auth:api falla con Estudiante
-Route::middleware(['role:ESTUDIANTE'])->prefix('estudiante')->group(function () {
+// Rutas de estudiante - usar middleware específico para estudiantes
+Route::middleware([\App\Http\Middleware\StudentAuthMiddleware::class])->prefix('estudiante')->group(function () {
 
     // Dashboard
     Route::get('/dashboard', [PanelEstudianteController::class, 'obtenerDashboard']);
@@ -473,23 +474,36 @@ Route::middleware(['auth:api', 'role:ADMIN,DOCENTE'])->prefix('personal')->group
 | Mantener para compatibilidad con frontend existente
 */
 
-// Notificaciones - Requiere autenticación y permisos
-Route::middleware(['auth:api'])->prefix('notificaciones')->group(function () {
-    Route::get('/', [NotificacionController::class, 'index'])->middleware('permission:notificaciones_ver');
-    Route::get('/contador', [NotificacionController::class, 'contador'])->middleware('permission:notificaciones_ver');
-    Route::get('/no-leidas', [NotificacionController::class, 'contador'])->middleware('permission:notificaciones_ver'); // Alias para compatibilidad
-    Route::get('/estadisticas', [NotificacionController::class, 'estadisticas'])->middleware('permission:notificaciones_ver');
-    Route::put('/{id}/marcar-leida', [NotificacionController::class, 'marcarLeida'])->middleware('permission:notificaciones_editar');
-    Route::put('/{id}/leida', [NotificacionController::class, 'marcarLeida'])->middleware('permission:notificaciones_editar'); // Alias para compatibilidad
-    Route::put('/marcar-todas-leidas', [NotificacionController::class, 'marcarTodasLeidas'])->middleware('permission:notificaciones_editar');
-    Route::put('/todas/leidas', [NotificacionController::class, 'marcarTodasLeidas'])->middleware('permission:notificaciones_editar'); // Alias para compatibilidad
-    Route::delete('/{id}', [NotificacionController::class, 'destroy'])->middleware('permission:notificaciones_eliminar');
+/*
+|--------------------------------------------------------------------------
+| RUTAS DE NOTIFICACIONES - ACCESIBLES PARA TODOS LOS ROLES
+|--------------------------------------------------------------------------
+| Las notificaciones son accesibles para estudiantes, docentes y administradores
+| Usa JwtVerifyMiddleware que maneja todos los tipos de usuarios (Estudiante, Usuario)
+*/
+Route::middleware([\App\Http\Middleware\JwtVerifyMiddleware::class])->prefix('notificaciones')->group(function () {
+    // Rutas comunes para todos los roles (lectura y gestión de notificaciones propias)
+    Route::get('/', [NotificacionController::class, 'index']);
+    Route::get('/contador', [NotificacionController::class, 'contador']);
+    Route::get('/no-leidas', [NotificacionController::class, 'contador']); // Alias para compatibilidad
+    Route::put('/{id}/marcar-leida', [NotificacionController::class, 'marcarLeida']);
+    Route::put('/{id}/leida', [NotificacionController::class, 'marcarLeida']); // Alias para compatibilidad
+    Route::put('/marcar-todas-leidas', [NotificacionController::class, 'marcarTodasLeidas']);
+    Route::put('/todas/leidas', [NotificacionController::class, 'marcarTodasLeidas']); // Alias para compatibilidad
 });
 
-// Notificaciones - Solo para administradores (crear y enviar masivas)
+/*
+|--------------------------------------------------------------------------
+| RUTAS ADMINISTRATIVAS DE NOTIFICACIONES
+|--------------------------------------------------------------------------
+| Solo para admin/docente con permisos (crear, eliminar, estadísticas)
+| Requiere autenticación con auth:api (solo Usuario, no Estudiante)
+*/
 Route::middleware(['auth:api'])->prefix('notificaciones')->group(function () {
+    Route::get('/estadisticas', [NotificacionController::class, 'estadisticas'])->middleware('permission:notificaciones_ver');
     Route::post('/', [NotificacionController::class, 'store'])->middleware('permission:notificaciones_crear');
     Route::post('/masiva', [NotificacionController::class, 'enviarMasiva'])->middleware('permission:notificaciones_crear');
+    Route::delete('/{id}', [NotificacionController::class, 'destroy'])->middleware('permission:notificaciones_eliminar');
 });
 
 // Test route for debugging

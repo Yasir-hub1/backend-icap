@@ -13,12 +13,12 @@ class Docente extends Persona implements AuthenticatableContract, JWTSubject
 {
     use Authenticatable;
     protected $table = 'docente';
-    protected $primaryKey = 'registro_docente';
+    protected $primaryKey = 'id'; // Heredado de Persona, compartiendo el mismo id
     public $timestamps = true;
 
     protected $fillable = [
         // Campos heredados de Persona
-        'id',
+        // NO incluir 'id' explícitamente - se hereda de Persona con INHERITS
         'ci',
         'nombre',
         'apellido',
@@ -27,7 +27,7 @@ class Docente extends Persona implements AuthenticatableContract, JWTSubject
         'fecha_nacimiento',
         'direccion',
         'fotografia',
-        'usuario_id',
+        // NO incluir usuario_id - la relación es: usuario tiene persona_id, no al revés
         // Campos propios de Docente
         'registro_docente',
         'cargo',
@@ -37,7 +37,6 @@ class Docente extends Persona implements AuthenticatableContract, JWTSubject
 
     protected $casts = [
         'id' => 'integer',
-        'usuario_id' => 'integer',
         'fecha_nacimiento' => 'date'
     ];
 

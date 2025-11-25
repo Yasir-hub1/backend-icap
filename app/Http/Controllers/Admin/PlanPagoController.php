@@ -8,6 +8,7 @@ use App\Models\Inscripcion;
 use App\Models\Cuota;
 use App\Models\Programa;
 use App\Traits\RegistraBitacora;
+use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;

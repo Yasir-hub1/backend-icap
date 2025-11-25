@@ -227,7 +227,8 @@ class PagoController extends Controller
             'cuota_id' => 'required|exists:cuotas,id',
             'monto' => 'required|numeric|min:0.01',
             'metodo' => 'required|in:QR,TRANSFERENCIA,EFECTIVO',
-            'comprobante' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120' // 5MB max
+            'comprobante' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120', // 5MB max
+            'token' => 'nullable|string|max:255'
         ]);
 
         DB::beginTransaction();
@@ -268,12 +269,26 @@ class PagoController extends Controller
                 ], 422);
             }
 
+            // Guardar comprobante de pago
+            $comprobantePath = null;
+            if ($request->hasFile('comprobante')) {
+                $file = $request->file('comprobante');
+                $nombreArchivo = time() . '_' . $file->getClientOriginalName();
+                $comprobantePath = $file->storeAs(
+                    "comprobantes/estudiante_{$estudianteObj->registro_estudiante}/cuota_{$cuota->id}",
+                    $nombreArchivo,
+                    'public'
+                );
+            }
+
             // Crear registro de pago
             $pago = Pago::create([
                 'fecha' => now()->toDateString(),
                 'monto' => $request->monto,
                 'token' => $request->token ?? Str::random(32),
-                'cuota_id' => $cuota->id
+                'cuota_id' => $cuota->id,
+                'comprobante' => $comprobantePath,
+                'metodo' => $request->metodo
             ]);
 
             // Verificar si todas las cuotas del plan están pagadas
@@ -281,13 +296,13 @@ class PagoController extends Controller
             $this->verificarEstadoPlan($plan);
 
             // Registrar en bitácora
-            $usuario = $estudiante->usuario;
+            $usuario = $estudianteObj->usuario;
             if ($usuario) {
                 Bitacora::create([
                     'fecha' => now()->toDateString(),
                     'tabla' => 'Pagos',
                     'codTabla' => $pago->id,
-                    'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) registró pago de {$request->monto} Bs. Token: " . ($request->token ?? $pago->token),
+                    'transaccion' => "Estudiante {$estudianteObj->nombre} {$estudianteObj->apellido} (CI: {$estudianteObj->ci}) registró pago de {$request->monto} Bs. Método: {$request->metodo}. Token: " . ($request->token ?? $pago->token),
                     'usuario_id' => $usuario->usuario_id
                 ]);
             }
@@ -296,9 +311,10 @@ class PagoController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Pago registrado exitosamente',
+                'message' => 'Pago registrado exitosamente. Pendiente de verificación.',
                 'data' => [
-                    'pago' => $pago->load('cuota')
+                    'pago' => $pago->load('cuota'),
+                    'comprobante_url' => $comprobantePath ? Storage::url($comprobantePath) : null
                 ]
             ], 201);
 
@@ -359,9 +375,9 @@ class PagoController extends Controller
                 'data' => [
                     'monto' => $cuota->saldo_pendiente,
                     'concepto' => "Cuota " . ($cuota->planPago->inscripcion->programa->nombre ?? ''),
-                    'referencia' => "EST-{$estudiante->registro_estudiante}-C{$cuota->id}",
-                    'estudiante' => $estudiante->nombre . ' ' . $estudiante->apellido,
-                    'ci' => $estudiante->ci
+                    'referencia' => "EST-{$estudianteObj->registro_estudiante}-C{$cuota->id}",
+                    'estudiante' => $estudianteObj->nombre . ' ' . $estudianteObj->apellido,
+                    'ci' => $estudianteObj->ci
                 ]
             ], 200);
 

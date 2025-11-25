@@ -27,12 +27,15 @@ class NotificacionController extends Controller
             $usuarioTipo = null;
 
             if ($usuario instanceof \App\Models\Estudiante) {
+                // Estudiante: usar registro_estudiante como identificador
                 $usuarioId = $usuario->registro_estudiante;
                 $usuarioTipo = 'student';
             } elseif ($usuario instanceof \App\Models\Docente) {
+                // Docente: usar id del docente
                 $usuarioId = $usuario->id;
-                $usuarioTipo = $usuario->cargo === 'Administrador' ? 'admin' : 'teacher';
+                $usuarioTipo = 'teacher';
             } elseif ($usuario instanceof \App\Models\Usuario) {
+                // Usuario (Admin o Docente con cuenta Usuario)
                 if (!$usuario->relationLoaded('rol')) {
                     $usuario->load('rol');
                 }
@@ -40,22 +43,28 @@ class NotificacionController extends Controller
                 if ($usuario->rol) {
                     $rolNombre = strtoupper($usuario->rol->nombre_rol);
                     if ($rolNombre === 'ADMIN') {
+                        // ADMIN: usar usuario_id del modelo Usuario
                         $usuarioTipo = 'admin';
-                        // Para ADMIN, usar el usuario_id del modelo Usuario
-                        $usuarioId = $usuario->usuario_id ?? $usuario->id;
+                        $usuarioId = $usuario->usuario_id;
                     } elseif ($rolNombre === 'DOCENTE') {
+                        // DOCENTE: buscar el docente asociado por persona_id
                         $usuarioTipo = 'teacher';
-                        $docente = \App\Models\Docente::where('persona_id', $usuario->persona_id)->first();
-                        $usuarioId = $docente ? $docente->id : ($usuario->usuario_id ?? $usuario->id);
+                        $docente = \App\Models\Docente::where('id', $usuario->persona_id)->first();
+                        if ($docente) {
+                            $usuarioId = $docente->id;
+                        } else {
+                            // Si no encuentra docente, usar usuario_id como fallback
+                            $usuarioId = $usuario->usuario_id;
+                        }
                     } else {
-                        // Si no es ADMIN ni DOCENTE, intentar como admin por defecto
+                        // Otro rol: tratar como admin por defecto
                         $usuarioTipo = 'admin';
-                        $usuarioId = $usuario->usuario_id ?? $usuario->id;
+                        $usuarioId = $usuario->usuario_id;
                     }
                 } else {
                     // Si no tiene rol, asumir admin
                     $usuarioTipo = 'admin';
-                    $usuarioId = $usuario->usuario_id ?? $usuario->id;
+                    $usuarioId = $usuario->usuario_id;
                 }
             }
 

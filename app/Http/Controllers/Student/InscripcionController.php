@@ -12,6 +12,7 @@ use App\Models\Cuota;
 use App\Models\Bitacora;
 use App\Models\Descuento;
 use App\Models\Horario;
+use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -26,17 +27,16 @@ class InscripcionController extends Controller
     {
         try {
             $authUser = $request->auth_user;
-            $registroEstudiante = $authUser instanceof Estudiante
-                ? $authUser->registro_estudiante
-                : $authUser->id;
-            $estudiante = Estudiante::findOrFail($registroEstudiante);
+            // El auth_user ya es una instancia de Estudiante desde el middleware
+            // Usar el id directamente (que es el id de persona, ya que estudiante hereda de persona)
+            $estudiante = $authUser instanceof Estudiante ? $authUser : Estudiante::findOrFail($authUser->id);
 
             // Validar que el estudiante tenga documentos aprobados
-            if ($estudiante->Estado_id < 4) {
+            if ($estudiante->estado_id < 4) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Debe tener los documentos aprobados para poder inscribirse',
-                    'estado_actual' => $estudiante->Estado_id,
+                    'estado_actual' => $estudiante->estado_id,
                     'estado_requerido' => 4
                 ], 400);
             }
@@ -56,7 +56,7 @@ class InscripcionController extends Controller
                 $q->where('estado', 1);
             })
             ->get()
-            ->map(function ($programa) use ($registroEstudiante) {
+            ->map(function ($programa) {
                 // Filtrar grupos con cupos disponibles
                 $gruposDisponibles = $programa->grupos->filter(function ($grupo) {
                     return $grupo->estudiantes_count < 30; // Cupo máximo
@@ -123,18 +123,17 @@ class InscripcionController extends Controller
 
         try {
             $authUser = $request->auth_user;
-            $registroEstudiante = $authUser instanceof Estudiante
-                ? $authUser->registro_estudiante
-                : $authUser->id;
-            $estudiante = Estudiante::findOrFail($registroEstudiante);
+            // El auth_user ya es una instancia de Estudiante desde el middleware
+            $estudiante = $authUser instanceof Estudiante ? $authUser : Estudiante::findOrFail($authUser->id);
 
-            $grupoNuevo = Grupo::with('horarios')->findOrFail($request->grupo_id);
+            $grupoNuevo = Grupo::with(['horarios', 'programa', 'modulo'])->findOrFail($request->grupo_id);
 
             // Obtener todos los grupos en los que el estudiante ya está inscrito
-            $gruposInscritos = Grupo::whereHas('estudiantes', function ($query) use ($registroEstudiante) {
-                $query->where('registro_estudiante', $registroEstudiante);
+            // La tabla grupo_estudiante usa estudiante_id (id de Estudiante, no registro_estudiante)
+            $gruposInscritos = Grupo::whereHas('estudiantes', function ($query) use ($estudiante) {
+                $query->where('estudiante_id', $estudiante->id);
             })
-            ->with('horarios')
+            ->with(['horarios', 'programa', 'modulo'])
             ->get();
 
             $conflictos = [];
@@ -166,14 +165,14 @@ class InscripcionController extends Controller
                                             'programa' => $grupoInscrito->programa ? $grupoInscrito->programa->nombre : null
                                         ],
                                         'horario_conflicto' => [
-                                            'dias' => implode(', ', $diasComunes),
-                                            'hora_ini' => $horaIniInscrito,
-                                            'hora_fin' => $horaFinInscrito
+                                            'dias' => $horarioInscrito->dias ?? implode(', ', $diasComunes),
+                                            'hora_ini' => $horarioInscrito->hora_ini ? Carbon::parse($horarioInscrito->hora_ini)->format('H:i') : $horaIniInscrito,
+                                            'hora_fin' => $horarioInscrito->hora_fin ? Carbon::parse($horarioInscrito->hora_fin)->format('H:i') : $horaFinInscrito
                                         ],
                                         'horario_nuevo' => [
                                             'dias' => $horarioNuevo->dias,
-                                            'hora_ini' => $horaIniNuevo,
-                                            'hora_fin' => $horaFinNuevo
+                                            'hora_ini' => $horarioNuevo->hora_ini ? Carbon::parse($horarioNuevo->hora_ini)->format('H:i') : $horaIniNuevo,
+                                            'hora_fin' => $horarioNuevo->hora_fin ? Carbon::parse($horarioNuevo->hora_fin)->format('H:i') : $horaFinNuevo
                                         ]
                                     ];
                                 }
@@ -220,17 +219,16 @@ class InscripcionController extends Controller
         DB::beginTransaction();
         try {
             $authUser = $request->auth_user;
-            $registroEstudiante = $authUser instanceof Estudiante
-                ? $authUser->registro_estudiante
-                : $authUser->id;
-            $estudiante = Estudiante::findOrFail($registroEstudiante);
+            // El auth_user ya es una instancia de Estudiante desde el middleware
+            // Usar el id directamente (que es el id de persona, ya que estudiante hereda de persona)
+            $estudiante = $authUser instanceof Estudiante ? $authUser : Estudiante::findOrFail($authUser->id);
 
-            // Validar Estado_id >= 4 (documentos aprobados)
-            if ($estudiante->Estado_id < 4) {
+            // Validar estado_id >= 4 (documentos aprobados)
+            if ($estudiante->estado_id < 4) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Debe tener los documentos aprobados para poder inscribirse',
-                    'estado_actual' => $estudiante->Estado_id,
+                    'estado_actual' => $estudiante->estado_id,
                     'estado_requerido' => 4
                 ], 400);
             }
@@ -269,10 +267,11 @@ class InscripcionController extends Controller
             }
 
             // Verificar conflictos de horario
-            $gruposInscritos = Grupo::whereHas('estudiantes', function ($query) use ($registroEstudiante) {
-                $query->where('registro_estudiante', $registroEstudiante);
+            // La tabla grupo_estudiante usa estudiante_id (id de Estudiante, no registro_estudiante)
+            $gruposInscritos = Grupo::whereHas('estudiantes', function ($query) use ($estudiante) {
+                $query->where('estudiante_id', $estudiante->id);
             })
-            ->with('horarios')
+            ->with(['horarios', 'programa', 'modulo'])
             ->get();
 
             foreach ($gruposInscritos as $grupoInscrito) {
@@ -309,13 +308,6 @@ class InscripcionController extends Controller
             }
 
             // Verificar que el estudiante no esté ya inscrito en el mismo programa
-            $estudiante = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
-            if (!$estudiante) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Estudiante no encontrado'
-                ], 404);
-            }
             $inscripcionExistente = Inscripcion::where('estudiante_id', $estudiante->id)
                 ->where('programa_id', $programa->id)
                 ->first();
@@ -345,16 +337,9 @@ class InscripcionController extends Controller
             $montoTotal = max(0, $montoTotal);
 
             // Crear registro de inscripción
-            $estudianteObj = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
-            if (!$estudianteObj) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Estudiante no encontrado'
-                ], 404);
-            }
             $inscripcion = Inscripcion::create([
                 'fecha' => now()->toDateString(),
-                'estudiante_id' => $estudianteObj->id,
+                'estudiante_id' => $estudiante->id,
                 'programa_id' => $programa->id
             ]);
 
@@ -388,13 +373,14 @@ class InscripcionController extends Controller
             }
 
             // Agregar estudiante al grupo
-            $grupo->estudiantes()->attach($registroEstudiante, [
+            // La tabla grupo_estudiante usa estudiante_id (id de Estudiante, no registro_estudiante)
+            $grupo->estudiantes()->attach($estudiante->id, [
                 'nota' => null,
                 'estado' => 'ACTIVO'
             ]);
 
-            // Cambiar Estado_id del estudiante a 5 (Inscrito)
-            $estudiante->Estado_id = 5;
+            // Cambiar estado_id del estudiante a 5 (Inscrito)
+            $estudiante->estado_id = 5;
             $estudiante->save();
 
             // Registrar en bitácora
@@ -427,7 +413,7 @@ class InscripcionController extends Controller
                         'costo_base' => $costoBase,
                         'monto_total' => $montoTotal,
                         'total_cuotas' => $numeroCuotas,
-                        'estado_estudiante' => $estudiante->Estado_id
+                        'estado_estudiante' => $estudiante->estado_id
                     ]
                 ]
             ], 201);
@@ -456,17 +442,9 @@ class InscripcionController extends Controller
             $authUser = $request->auth_user;
             $perPage = $request->input('per_page', 15);
 
-            $registroEstudiante = $authUser instanceof Estudiante
-                ? $authUser->registro_estudiante
-                : $authUser->id;
-
-            $estudiante = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
-            if (!$estudiante) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Estudiante no encontrado'
-                ], 404);
-            }
+            // El auth_user ya es una instancia de Estudiante desde el middleware
+            // Usar el id directamente (que es el id de persona, ya que estudiante hereda de persona)
+            $estudiante = $authUser instanceof Estudiante ? $authUser : Estudiante::findOrFail($authUser->id);
 
             $inscripciones = Inscripcion::with([
                 'programa.ramaAcademica',
@@ -529,17 +507,9 @@ class InscripcionController extends Controller
     {
         try {
             $authUser = $request->auth_user;
-            $registroEstudiante = $authUser instanceof Estudiante
-                ? $authUser->registro_estudiante
-                : $authUser->id;
-
-            $estudiante = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
-            if (!$estudiante) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Estudiante no encontrado'
-                ], 404);
-            }
+            // El auth_user ya es una instancia de Estudiante desde el middleware
+            // Usar el id directamente (que es el id de persona, ya que estudiante hereda de persona)
+            $estudiante = $authUser instanceof Estudiante ? $authUser : Estudiante::findOrFail($authUser->id);
 
             $inscripcion = Inscripcion::with([
                 'programa.ramaAcademica',

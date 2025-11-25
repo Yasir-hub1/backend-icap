@@ -11,9 +11,11 @@ class DocumentoSeeder extends Seeder
     {
         // Tipos de Documento
         $tiposDocumento = [
-            ['nombre_entidad' => 'Estudiante'],
-            ['nombre_entidad' => 'Estudiante'],
-            ['nombre_entidad' => 'Estudiante'],
+            ['nombre_entidad' => 'Carnet de Identidad - Anverso'],
+            ['nombre_entidad' => 'Carnet de Identidad - Reverso'],
+            ['nombre_entidad' => 'Certificado de Nacimiento'],
+            ['nombre_entidad' => 'Título de Bachiller'],
+
         ];
         DB::table('tipo_documento')->insert($tiposDocumento);
 

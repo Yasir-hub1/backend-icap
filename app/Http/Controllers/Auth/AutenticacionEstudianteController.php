@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
 use App\Models\Bitacora;
+use App\Models\Notificacion;
 use App\Helpers\CodigoHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Carbon\Carbon;
 
@@ -28,10 +30,14 @@ class AutenticacionEstudianteController extends Controller
             'fecha_nacimiento' => 'required|date|before:-14 years',
             'direccion' => 'required|string|max:300',
             'provincia' => 'required|string|max:100',
+            'sexo' => 'required|in:M,F',
+            'email' => 'required|email|max:255|unique:usuario,email',
             'password' => 'required|string|min:8|regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/',
             'password_confirmation' => 'required|same:password'
         ], [
             'ci.unique' => 'El CI ya está registrado en el sistema',
+            'email.unique' => 'El email ya está registrado en el sistema',
+            'email.email' => 'El email debe tener un formato válido',
             'fecha_nacimiento.before' => 'Debe ser mayor de 14 años',
             'password.regex' => 'La contraseña debe contener al menos una mayúscula, una minúscula y un número'
         ]);
@@ -47,78 +53,206 @@ class AutenticacionEstudianteController extends Controller
             // Generar código único de 5 dígitos para el estudiante
             $registroEstudiante = CodigoHelper::generarCodigoEstudiante();
 
-            // Con PostgreSQL INHERITS, Estudiante hereda de Persona
-            // Crear Estudiante directamente (que incluye los campos de Persona)
-            $estudiante = Estudiante::create([
-                'id' => null, // Se generará automáticamente
-                'ci' => $request->ci,
-                'nombre' => $request->nombre,
-                'apellido' => $request->apellido,
-                'celular' => $request->celular,
-                'fecha_nacimiento' => $request->fecha_nacimiento,
-                'direccion' => $request->direccion,
-                'provincia' => $request->provincia,
-                'registro_estudiante' => $registroEstudiante,
-                'estado_id' => 1 // Estado inicial
-            ]);
+            // SOLUCIÓN CORRECTA: Con PostgreSQL INHERITS, debemos seguir el patrón del seeder
+            // 1. Insertar primero en persona para obtener el ID
+            // 2. Luego insertar en estudiante con ese mismo ID
+            // 3. Finalmente crear el usuario con ese ID
+            // Esto evita problemas de visibilidad de foreign keys con INHERITS dentro de transacciones
+            DB::beginTransaction();
 
-            Log::info('Estudiante creado', [
-                'id' => $estudiante->id,
-                'registro_estudiante' => $estudiante->registro_estudiante
-            ]);
+            try {
+                // PASO 1: Insertar primero en persona para obtener el ID
+                // Esto garantiza que el ID existe en persona antes de crear el usuario
+                $personaId = DB::table('persona')->insertGetId([
+                    'ci' => $request->ci,
+                    'nombre' => $request->nombre,
+                    'apellido' => $request->apellido,
+                    'celular' => $request->celular,
+                    'sexo' => $request->sexo,
+                    'fecha_nacimiento' => $request->fecha_nacimiento,
+                    'direccion' => $request->direccion,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
 
-            // Obtener el rol ESTUDIANTE
-            $rolEstudiante = \App\Models\Rol::where('nombre_rol', 'ESTUDIANTE')->first();
+                // PASO 2: Insertar en estudiante con el mismo ID de persona
+                // Con INHERITS, esto crea el registro en estudiante que hereda de persona
+                DB::table('estudiante')->insert([
+                    'id' => $personaId, // Usar el mismo ID de persona
+                    'ci' => $request->ci,
+                    'nombre' => $request->nombre,
+                    'apellido' => $request->apellido,
+                    'celular' => $request->celular,
+                    'sexo' => $request->sexo,
+                    'fecha_nacimiento' => $request->fecha_nacimiento,
+                    'direccion' => $request->direccion,
+                    'provincia' => $request->provincia,
+                    'registro_estudiante' => $registroEstudiante,
+                    'estado_id' => 1, // Estado inicial: Pre-registrado
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
 
-            if (!$rolEstudiante) {
-                Log::error('Rol ESTUDIANTE no encontrado en la base de datos');
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Error de configuración: Rol ESTUDIANTE no encontrado'
-                ], 500);
+                // Cargar el modelo Estudiante con el id generado
+                $estudiante = Estudiante::find($personaId);
+                if (!$estudiante) {
+                    DB::rollBack();
+                    throw new \Exception('Error: No se pudo cargar el estudiante después de la inserción.');
+                }
+
+                Log::info('Estudiante creado', [
+                    'id' => $estudiante->id,
+                    'registro_estudiante' => $estudiante->registro_estudiante,
+                    'ci' => $estudiante->ci
+                ]);
+
+                // Obtener el rol ESTUDIANTE
+                $rolEstudiante = \App\Models\Rol::where('nombre_rol', 'ESTUDIANTE')->first();
+
+                if (!$rolEstudiante) {
+                    DB::rollBack();
+                    Log::error('Rol ESTUDIANTE no encontrado en la base de datos');
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Error de configuración: Rol ESTUDIANTE no encontrado'
+                    ], 500);
+                }
+
+                // PASO 3: Create usuario with email and password
+                // Ahora el persona_id existe en persona, así que la foreign key funcionará correctamente
+                $usuarioResultado = DB::selectOne("
+                    INSERT INTO usuario (email, password, persona_id, rol_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    RETURNING usuario_id
+                ", [
+                    trim(strtolower($request->email)), // Usar el email proporcionado, normalizado
+                    Hash::make($request->password),
+                    $personaId, // Usar el ID de persona que ya existe
+                    $rolEstudiante->rol_id,
+                    now(),
+                    now()
+                ]);
+
+                if (!$usuarioResultado || !isset($usuarioResultado->usuario_id)) {
+                    DB::rollBack();
+                    throw new \Exception('Error: No se pudo crear el usuario o recuperar su ID.');
+                }
+
+                // Commit la transacción completa
+                DB::commit();
+
+                // Cargar el modelo Usuario después del commit
+                $usuario = \App\Models\Usuario::find($usuarioResultado->usuario_id);
+                if (!$usuario) {
+                    throw new \Exception('Error: No se pudo cargar el usuario después de la creación.');
+                }
+
+                Log::info('Usuario creado', [
+                    'usuario_id' => $usuario->usuario_id,
+                    'rol_id' => $usuario->rol_id,
+                    'rol_nombre' => $rolEstudiante->nombre_rol
+                ]);
+
+            } catch (\Exception $e) {
+                if (DB::transactionLevel() > 0) {
+                    DB::rollBack();
+                }
+                Log::error('Error al insertar estudiante y crear usuario', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'ci' => $request->ci,
+                    'registro_estudiante' => $registroEstudiante
+                ]);
+                throw $e;
             }
-
-            // Create usuario with password
-            // Estudiante hereda de Persona, usa el mismo id
-            $usuario = \App\Models\Usuario::create([
-                'email' => $request->ci . '@estudiante.com', // Usar CI como email temporal
-                'password' => Hash::make($request->password),
-                'persona_id' => $estudiante->id, // Estudiante hereda de Persona, usa el mismo id
-                'rol_id' => $rolEstudiante->rol_id // Asignar rol ESTUDIANTE
-            ]);
-
-            Log::info('Usuario creado', [
-                'usuario_id' => $usuario->usuario_id,
-                'rol_id' => $usuario->rol_id,
-                'rol_nombre' => $rolEstudiante->nombre_rol
-            ]);
 
             // Log to Bitacora
             Bitacora::create([
-                'fecha_hora' => now(),
+                'fecha' => now()->toDateString(),
                 'tabla' => 'Estudiante',
-                'cod_tabla' => $estudiante->registro_estudiante,
+                'codTabla' => $estudiante->registro_estudiante,
                 'transaccion' => 'REGISTRO_NUEVO_ESTUDIANTE',
                 'usuario_id' => $usuario->usuario_id
             ]);
 
-            // Generar token JWT automáticamente después del registro
-            $token = JWTAuth::fromUser($estudiante);
+            // Enviar notificación de bienvenida al estudiante
+            // Nota: Notificacion usa registro_estudiante como usuario_id para estudiantes
+            // según la relación definida en el modelo Notificacion
+            try {
+                Notificacion::crearNotificacion(
+                    $estudiante->registro_estudiante, // El modelo Notificacion espera registro_estudiante para estudiantes
+                    'student',
+                    '¡Bienvenido a ICAP UAGRM!',
+                    'Tu registro ha sido exitoso. Para completar tu proceso de inscripción, debes subir los siguientes documentos: Fotocopia de cédula de identidad, Certificado de nacimiento, 2 fotografías tamaño 3x3 (fondo gris), y Título de bachiller (solo para técnico medio).',
+                    'info',
+                    [
+                        'estudiante_id' => $estudiante->id, // Usar id para datos adicionales
+                        'registro_estudiante' => $estudiante->registro_estudiante,
+                        'estado_id' => $estudiante->estado_id,
+                        'action' => 'upload_documents'
+                    ]
+                );
+            } catch (\Exception $e) {
+                Log::warning('Error enviando notificación de bienvenida', [
+                    'error' => $e->getMessage(),
+                    'estudiante_id' => $estudiante->id,
+                    'registro_estudiante' => $estudiante->registro_estudiante
+                ]);
+            }
 
-            return response()->json([
+            // Generar token JWT automáticamente después del registro
+            // Usar custom claims para asegurar que el token incluya toda la información necesaria
+            $customClaims = [
+                'rol' => 'ESTUDIANTE',
+                'rol_id' => $usuario->rol_id,
+                'usuario_id' => $usuario->usuario_id,
+                'persona_id' => $estudiante->id,
+                'ci' => $estudiante->ci,
+                'registro' => $estudiante->registro_estudiante
+            ];
+
+            try {
+                $token = JWTAuth::customClaims($customClaims)->fromUser($estudiante);
+            } catch (\Exception $e) {
+                Log::error('Error generando token JWT en registro', [
+                    'error' => $e->getMessage(),
+                    'estudiante_id' => $estudiante->id,
+                    'trace' => $e->getTraceAsString()
+                ]);
+                // No fallar el registro si el token falla, pero loguear el error
+                $token = null;
+            }
+
+            // Verificar que el token se generó correctamente
+            if ($token) {
+                try {
+                    $payload = JWTAuth::setToken($token)->getPayload();
+                    Log::info('Token generado correctamente en registro', [
+                        'sub' => $payload->get('sub'),
+                        'rol' => $payload->get('rol'),
+                        'estudiante_id' => $estudiante->id,
+                        'registro_estudiante' => $estudiante->registro_estudiante
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Error verificando token generado en registro', [
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            } else {
+                Log::warning('Token no generado en registro, pero el estudiante fue creado exitosamente');
+            }
+
+            $response = [
                 'success' => true,
                 'message' => 'Registro exitoso. Bienvenido al sistema',
-                'token' => $token,
-                'token_type' => 'bearer',
-                'expires_in' => JWTAuth::factory()->getTTL() * 60,
                 'user' => [
-                    'id' => $estudiante->registro_estudiante,
+                    'id' => $estudiante->id, // Usar id real para consistencia con JWT
                     'ci' => $estudiante->ci,
                     'nombre' => $estudiante->nombre,
                     'apellido' => $estudiante->apellido,
                     'nombre_completo' => trim($estudiante->nombre . ' ' . $estudiante->apellido),
                     'registro_estudiante' => $estudiante->registro_estudiante,
-                    'Estado_id' => $estudiante->Estado_id,
+                    'estado_id' => $estudiante->estado_id,
                     'provincia' => $estudiante->provincia,
                     'celular' => $estudiante->celular,
                     'email' => $usuario->email,
@@ -128,7 +262,16 @@ class AutenticacionEstudianteController extends Controller
                 'data' => [
                     'registro_estudiante' => $estudiante->registro_estudiante
                 ]
-            ], 201);
+            ];
+
+            // Solo incluir token si se generó correctamente
+            if ($token) {
+                $response['token'] = $token;
+                $response['token_type'] = 'bearer';
+                $response['expires_in'] = JWTAuth::factory()->getTTL() * 60;
+            }
+
+            return response()->json($response, 201);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -145,7 +288,7 @@ class AutenticacionEstudianteController extends Controller
     public function iniciarSesion(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'ci' => 'required|string',
+            'email' => 'required|email',
             'password' => 'required|string'
         ]);
 
@@ -157,41 +300,40 @@ class AutenticacionEstudianteController extends Controller
         }
 
         try {
-            // Buscar estudiante por CI
-            $estudiante = Estudiante::where('ci', $request->ci)->first();
+            // Limpiar y normalizar email
+            $email = trim(strtolower($request->email));
+
+            // Buscar usuario por email
+            $usuario = \App\Models\Usuario::where('email', $email)->first();
 
             Log::info('Login attempt', [
-                'ci' => $request->ci,
-                'estudiante_found' => $estudiante ? true : false,
-                'estudiante_id' => $estudiante ? $estudiante->registro_estudiante : null,
-                'id' => $estudiante ? $estudiante->id : null // Estudiante hereda de Persona, usa el mismo id
-            ]);
-
-            if (!$estudiante) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'CI o contraseña incorrectos'
-                ], 401);
-            }
-
-            // Buscar el usuario asociado a la persona del estudiante
-            $usuario = $estudiante->usuario;
-
-            Log::info('Usuario found', [
+                'email' => $email,
+                'email_original' => $request->email,
                 'usuario_found' => $usuario ? true : false,
                 'usuario_id' => $usuario ? $usuario->usuario_id : null,
-                'has_password' => $usuario ? !empty($usuario->password) : false,
-                'rol_id' => $usuario ? $usuario->rol_id : null
+                'persona_id' => $usuario ? $usuario->persona_id : null
             ]);
 
             if (!$usuario) {
-                Log::warning('Estudiante sin usuario asociado', [
-                    'estudiante_id' => $estudiante->registro_estudiante,
-                    'id' => $estudiante->id // Estudiante hereda de Persona, usa el mismo id
+                Log::warning('Usuario no encontrado', [
+                    'email' => $email
                 ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'CI o contraseña incorrectos'
+                    'message' => 'Email o contraseña incorrectos'
+                ], 401);
+            }
+
+            // Verificar que el usuario tenga rol ESTUDIANTE
+            $usuario->load('rol');
+            if (!$usuario->rol || $usuario->rol->nombre_rol !== 'ESTUDIANTE') {
+                Log::warning('Usuario no es estudiante', [
+                    'usuario_id' => $usuario->usuario_id,
+                    'rol' => $usuario->rol ? $usuario->rol->nombre_rol : null
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email o contraseña incorrectos'
                 ], 401);
             }
 
@@ -199,25 +341,83 @@ class AutenticacionEstudianteController extends Controller
             if (!Hash::check($request->password, $usuario->password)) {
                 Log::warning('Contraseña incorrecta', [
                     'usuario_id' => $usuario->usuario_id,
-                    'ci' => $request->ci
+                    'email' => $email
                 ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'CI o contraseña incorrectos'
+                    'message' => 'Email o contraseña incorrectos'
                 ], 401);
             }
 
-            // Generate JWT token
-            $token = JWTAuth::fromUser($estudiante);
+            // Buscar el estudiante asociado a la persona del usuario
+            $estudiante = Estudiante::where('id', $usuario->persona_id)->first();
+
+            if (!$estudiante) {
+                Log::warning('Estudiante no encontrado para usuario', [
+                    'usuario_id' => $usuario->usuario_id,
+                    'persona_id' => $usuario->persona_id
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email o contraseña incorrectos'
+                ], 401);
+            }
+
+            Log::info('Estudiante encontrado', [
+                'estudiante_id' => $estudiante->id,
+                'registro_estudiante' => $estudiante->registro_estudiante,
+                'ci' => $estudiante->ci
+            ]);
+
+            // Generate JWT token con custom claims explícitos
+            // Esto asegura que el token incluya toda la información necesaria
+            $customClaims = [
+                'rol' => 'ESTUDIANTE',
+                'rol_id' => $usuario->rol_id,
+                'usuario_id' => $usuario->usuario_id,
+                'persona_id' => $estudiante->id,
+                'ci' => $estudiante->ci,
+                'registro' => $estudiante->registro_estudiante
+            ];
+
+            try {
+                $token = JWTAuth::customClaims($customClaims)->fromUser($estudiante);
+            } catch (\Exception $e) {
+                Log::error('Error generando token JWT', [
+                    'error' => $e->getMessage(),
+                    'estudiante_id' => $estudiante->id,
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error al generar token de autenticación',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
 
             // Log to Bitacora
             Bitacora::create([
-                'fecha_hora' => now(),
+                'fecha' => now()->toDateString(),
                 'tabla' => 'Estudiante',
-                'cod_tabla' => $estudiante->registro_estudiante,
+                'codTabla' => $estudiante->registro_estudiante,
                 'transaccion' => 'LOGIN_ESTUDIANTE',
                 'usuario_id' => $usuario->usuario_id
             ]);
+
+            // Verificar que el token se generó correctamente
+            try {
+                $payload = JWTAuth::setToken($token)->getPayload();
+                Log::info('Token generado correctamente', [
+                    'sub' => $payload->get('sub'),
+                    'rol' => $payload->get('rol'),
+                    'estudiante_id' => $estudiante->id,
+                    'registro_estudiante' => $estudiante->registro_estudiante
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Error verificando token generado', [
+                    'error' => $e->getMessage()
+                ]);
+            }
 
             return response()->json([
                 'success' => true,
@@ -225,13 +425,13 @@ class AutenticacionEstudianteController extends Controller
                 'token_type' => 'bearer',
                 'expires_in' => JWTAuth::factory()->getTTL() * 60,
                 'user' => [
-                    'id' => $estudiante->registro_estudiante,
+                    'id' => $estudiante->id, // Usar id real para consistencia con JWT
                     'ci' => $estudiante->ci,
                     'nombre' => $estudiante->nombre,
                     'apellido' => $estudiante->apellido,
                     'nombre_completo' => trim($estudiante->nombre . ' ' . $estudiante->apellido),
                     'registro_estudiante' => $estudiante->registro_estudiante,
-                    'Estado_id' => $estudiante->Estado_id,
+                    'estado_id' => $estudiante->estado_id,
                     'provincia' => $estudiante->provincia,
                     'celular' => $estudiante->celular,
                     'email' => $usuario->email,
@@ -271,8 +471,9 @@ class AutenticacionEstudianteController extends Controller
                     $rol = $payload->get('rol');
 
                     if ($rol === 'ESTUDIANTE') {
-                        $registroEstudiante = $payload->get('sub');
-                        $user = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+                        // El 'sub' en el token JWT para estudiantes es el id (devuelto por getJWTIdentifier)
+                        $estudianteId = $payload->get('sub');
+                        $user = Estudiante::find($estudianteId);
                     } else {
                         // Para admin/docente, el sub es usuario_id
                         $usuarioId = $payload->get('sub');
@@ -311,7 +512,7 @@ class AutenticacionEstudianteController extends Controller
                     return response()->json([
                         'success' => true,
                         'data' => [
-                            'id' => $user->registro_estudiante,
+                            'id' => $user->id,
                             'ci' => $user->ci,
                             'nombre' => $user->nombre,
                             'apellido' => $user->apellido,
@@ -321,7 +522,7 @@ class AutenticacionEstudianteController extends Controller
                             'direccion' => $user->direccion,
                             'registro_estudiante' => $user->registro_estudiante,
                             'provincia' => $user->provincia,
-                            'Estado_id' => $user->Estado_id,
+                            'estado_id' => $user->estado_id,
                             'fotografia' => $user->fotografia,
                             'email' => $usuario ? $usuario->email : null,
                             'rol' => 'ESTUDIANTE',

@@ -10,7 +10,7 @@ class EstudianteSeeder extends Seeder
 {
     public function run(): void
     {
-        // Primero crear las personas
+        // Primero crear las personas (sin usuario_id - la relación es inversa)
         $personas = [
             [
                 'ci' => '4567890',
@@ -21,7 +21,6 @@ class EstudianteSeeder extends Seeder
                 'fecha_nacimiento' => '1995-03-25',
                 'direccion' => 'Zona Sur, Calle 5 N° 123',
                 'fotografia' => null,
-                'usuario_id' => null,
             ],
             [
                 'ci' => '5678901',
@@ -32,7 +31,6 @@ class EstudianteSeeder extends Seeder
                 'fecha_nacimiento' => '1998-07-12',
                 'direccion' => 'Zona Norte, Av. Libertad N° 456',
                 'fotografia' => null,
-                'usuario_id' => null,
             ],
             [
                 'ci' => '6789012',
@@ -43,7 +41,6 @@ class EstudianteSeeder extends Seeder
                 'fecha_nacimiento' => '1996-11-08',
                 'direccion' => 'Zona Central, Calle Potosí N° 789',
                 'fotografia' => null,
-                'usuario_id' => null,
             ],
         ];
         
@@ -53,7 +50,7 @@ class EstudianteSeeder extends Seeder
             $personaIds[] = $id;
         }
 
-        // Crear estudiantes con códigos únicos de 5 dígitos
+        // Crear estudiantes con códigos únicos de 5 dígitos (sin usuario_id - la relación es inversa)
         $estudiantes = [
             [
                 'id' => $personaIds[0],
@@ -65,7 +62,6 @@ class EstudianteSeeder extends Seeder
                 'fecha_nacimiento' => '1995-03-25',
                 'direccion' => 'Zona Sur, Calle 5 N° 123',
                 'fotografia' => null,
-                'usuario_id' => null,
                 'registro_estudiante' => CodigoHelper::generarCodigoEstudiante(),
                 'provincia' => 'La Paz',
                 'estado_id' => 1,
@@ -80,7 +76,6 @@ class EstudianteSeeder extends Seeder
                 'fecha_nacimiento' => '1998-07-12',
                 'direccion' => 'Zona Norte, Av. Libertad N° 456',
                 'fotografia' => null,
-                'usuario_id' => null,
                 'registro_estudiante' => CodigoHelper::generarCodigoEstudiante(),
                 'provincia' => 'La Paz',
                 'estado_id' => 1,
@@ -95,7 +90,6 @@ class EstudianteSeeder extends Seeder
                 'fecha_nacimiento' => '1996-11-08',
                 'direccion' => 'Zona Central, Calle Potosí N° 789',
                 'fotografia' => null,
-                'usuario_id' => null,
                 'registro_estudiante' => CodigoHelper::generarCodigoEstudiante(),
                 'provincia' => 'Cochabamba',
                 'estado_id' => 2,

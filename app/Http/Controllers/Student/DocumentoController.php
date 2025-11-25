@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Documento;
 use App\Models\TipoDocumento;
 use App\Models\Bitacora;
+use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class DocumentoController extends Controller
 {
+    use EnviaNotificaciones;
     public function listar(Request $request)
     {
         return $this->index($request);
@@ -22,25 +24,43 @@ class DocumentoController extends Controller
         try {
             $estudiante = $request->auth_user;
 
-            $tiposRequeridos = TipoDocumento::where('nombre_entidad', 'Estudiante')->get();
+            // Obtener todos los tipos de documento para estudiantes (incluyendo el opcional)
+            $tiposDocumento = TipoDocumento::whereIn('nombre_entidad', [
+                'Carnet de Identidad - Anverso',
+                'Carnet de Identidad - Reverso',
+                'Certificado de Nacimiento',
+                'Título de Bachiller'
+            ])->get();
 
-            $documentos = $tiposRequeridos->map(function($tipo) use ($estudiante) {
-                $documento = Documento::where('persona_id', $estudiante->id)
-                                      ->where('tipo_documento_id', $tipo->tipo_documento_id)
-                                      ->latest()
-                                      ->first();
+            $documentos = $tiposDocumento->map(function($tipo) use ($estudiante) {
+                // Obtener la última versión APROBADA de este tipo de documento
+                // Si no hay aprobada, obtener la última versión (pendiente o rechazada) para que el estudiante sepa que debe subirla
+                $documentoAprobado = Documento::where('persona_id', $estudiante->id)
+                    ->where('tipo_documento_id', $tipo->tipo_documento_id)
+                    ->where('estado', '1') // Solo documentos aprobados
+                    ->orderBy('version', 'desc')
+                    ->first();
+
+                // Si no hay documento aprobado, obtener la última versión (para mostrar estado pendiente/rechazado)
+                if (!$documentoAprobado) {
+                    $documentoAprobado = Documento::where('persona_id', $estudiante->id)
+                        ->where('tipo_documento_id', $tipo->tipo_documento_id)
+                        ->orderBy('version', 'desc')
+                        ->first();
+                }
 
                 return [
                     'tipo_documento_id' => $tipo->tipo_documento_id,
                     'nombre_entidad' => $tipo->nombre_entidad,
-                    'documento_id' => $documento->documento_id ?? null,
-                    'nombre_documento' => $documento->nombre_documento ?? null,
-                    'estado' => $documento->estado ?? null,
-                    'observaciones' => $documento->observaciones ?? null,
-                    'path' => $documento->path_documento ?? null,
-                    'version' => $documento->version ?? null,
-                    'fecha_subida' => $documento->created_at ?? null,
-                    'url_descarga' => $documento && $documento->path_documento ? Storage::url($documento->path_documento) : null
+                    'nombre' => $tipo->nombre_entidad,
+                    'documento_id' => $documentoAprobado->documento_id ?? null,
+                    'nombre_documento' => $documentoAprobado->nombre_documento ?? null,
+                    'estado' => $documentoAprobado->estado ?? null,
+                    'observaciones' => $documentoAprobado->observaciones ?? null,
+                    'path' => $documentoAprobado->path_documento ?? null,
+                    'version' => $documentoAprobado->version ?? null,
+                    'fecha_subida' => $documentoAprobado->created_at ?? null,
+                    'url_descarga' => $documentoAprobado && $documentoAprobado->path_documento ? Storage::url($documentoAprobado->path_documento) : null
                 ];
             });
 
@@ -122,17 +142,67 @@ class DocumentoController extends Controller
                 ]);
             }
 
+            // SEGÚN EL FLUJO:
+            // 1. estado_id = 1 (Pre-registrado): Estudiante se registra, no ha subido documentos
+            // 2. estado_id = 2 (Documentos incompletos): Estudiante ha subido algunos documentos pero no los 3 requeridos
+            // 3. estado_id = 3 (En revisión): Estudiante ha subido los 3 documentos requeridos → Se envía a revisión
+            // 4. estado_id = 4 (Validado - Activo): Todos los documentos aprobados
+            // 5. estado_id = 5 (Rechazado): Documentos rechazados, debe volver a subirlos
+
             // Verificar si todos los documentos requeridos están subidos
-            $totalRequeridos = TipoDocumento::where('nombre_entidad', 'Estudiante')->count();
+            // Documentos requeridos (excluyendo "Título de Bachiller" que es opcional)
+            $tiposRequeridos = TipoDocumento::whereIn('nombre_entidad', [
+                'Carnet de Identidad - Anverso',
+                'Carnet de Identidad - Reverso',
+                'Certificado de Nacimiento'
+            ])->pluck('tipo_documento_id');
+
+            $totalRequeridos = $tiposRequeridos->count(); // Debe ser 3
             $totalSubidos = Documento::where('persona_id', $estudiante->id)
-                                     ->whereIn('tipo_documento_id', TipoDocumento::where('nombre_entidad', 'Estudiante')->pluck('tipo_documento_id'))
+                                     ->whereIn('tipo_documento_id', $tiposRequeridos)
                                      ->distinct('tipo_documento_id')
                                      ->count('tipo_documento_id');
 
-            // Cambiar estado a 3 (Documentos pendientes de validación) si todos están subidos
-            if ($totalSubidos >= $totalRequeridos && $estudiante->Estado_id != 3) {
-                $estudiante->update(['Estado_id' => 3]);
+            // LÓGICA DE CAMBIO DE ESTADO SEGÚN EL FLUJO:
+            // 1. estado_id = 1 (Pre-registrado): Estudiante se registra, no ha subido documentos
+            // 2. estado_id = 2 (Documentos incompletos): Estudiante ha subido algunos documentos pero no los 3 requeridos
+            // 3. estado_id = 3 (En revisión): Estudiante ha subido los 3 documentos requeridos → Se envía a revisión
+            // 4. estado_id = 4 (Validado - Activo): Todos los documentos aprobados
+            // 5. estado_id = 5 (Rechazado): Documentos rechazados, debe volver a subirlos
+
+            if ($totalSubidos >= $totalRequeridos && $totalRequeridos >= 3) {
+                // Si se han subido los 3 documentos requeridos → estado_id = 3 (En revisión)
+                // Esto envía automáticamente los documentos a revisión
+                // Aplicar si está en estado 1, 2 o 5 (no cambiar si ya está en 3 o 4)
+                if (in_array($estudiante->estado_id, [1, 2, 5])) {
+                    $estudiante->update(['estado_id' => 3]);
+
+                    // NOTIFICAR A TODOS LOS ADMINISTRADORES que hay documentos pendientes de revisión
+                    // Esto es crítico para que los admins sepan que deben revisar los documentos
+                    $this->notificarTodosAdmins(
+                        'Documentos Pendientes de Revisión',
+                        "El estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}, Registro: {$estudiante->registro_estudiante}) ha completado la carga de sus 3 documentos requeridos y están pendientes de validación. Por favor, revisa los documentos en el panel de validación.",
+                        'documento',
+                        [
+                            'estudiante_id' => $estudiante->id,
+                            'registro_estudiante' => $estudiante->registro_estudiante,
+                            'estudiante_nombre' => "{$estudiante->nombre} {$estudiante->apellido}",
+                            'estudiante_ci' => $estudiante->ci,
+                            'cantidad_documentos' => $totalSubidos,
+                            'accion' => 'revisar_documentos',
+                            'url' => "/admin/validacion-documentos"
+                        ]
+                    );
+                }
+            } elseif ($totalSubidos > 0 && $totalSubidos < $totalRequeridos) {
+                // Si se han subido algunos documentos pero no todos → estado_id = 2 (Documentos incompletos)
+                // Solo cambiar si está en estado 1 (Pre-registrado) o 5 (Rechazado)
+                // No cambiar si ya está en estado 2, 3 o 4
+                if (in_array($estudiante->estado_id, [1, 5])) {
+                    $estudiante->update(['estado_id' => 2]);
+                }
             }
+            // Si totalSubidos == 0, mantener estado_id = 1 (Pre-registrado) o el estado actual
 
             return response()->json(['success' => true, 'message' => 'Documento subido exitosamente', 'data' => $documento], 201);
         } catch (\Exception $e) {

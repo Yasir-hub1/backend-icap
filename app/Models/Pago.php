@@ -20,7 +20,8 @@ class Pago extends Model
         'fecha_verificacion',
         'verificado_por',
         'observaciones',
-        'metodo'
+        'metodo',
+        'comprobante'
     ];
 
     protected $casts = [

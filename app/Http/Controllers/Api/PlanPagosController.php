@@ -107,7 +107,7 @@ class PlanPagosController extends Controller
                     'fecha_ini' => $cuotaData['fecha_ini'],
                     'fecha_fin' => $cuotaData['fecha_fin'],
                     'monto' => $cuotaData['monto'],
-                    'plan_pagos_id' => $plan->id
+                    'plan_pago_id' => $plan->id
                 ]);
             }
 

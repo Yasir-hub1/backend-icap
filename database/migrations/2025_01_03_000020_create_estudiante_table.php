@@ -14,9 +14,11 @@ return new class extends Migration
     {
         // Usar herencia nativa de PostgreSQL
         // INHERITS hereda automáticamente todos los campos de Persona, incluyendo timestamps
+        // La primary key es 'id' heredada de persona, no registro_estudiante
         DB::statement('
             CREATE TABLE "estudiante" (
-                registro_estudiante VARCHAR(50) PRIMARY KEY,
+                id BIGINT PRIMARY KEY,
+                registro_estudiante VARCHAR(50) UNIQUE,
                 provincia VARCHAR(100),
                 estado_id BIGINT,
                 FOREIGN KEY (estado_id) REFERENCES "estado_estudiante"(id) ON DELETE SET NULL

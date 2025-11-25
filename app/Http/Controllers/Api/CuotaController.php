@@ -22,8 +22,8 @@ class CuotaController extends Controller
             'pagos'
         ]);
 
-        if ($request->filled('plan_pagos_id')) {
-            $query->where('plan_pagos_id', $request->get('plan_pagos_id'));
+        if ($request->filled('plan_pago_id')) {
+            $query->where('plan_pago_id', $request->get('plan_pago_id'));
         }
 
         if ($request->filled('estado')) {
@@ -85,7 +85,7 @@ class CuotaController extends Controller
             'fecha_ini' => 'required|date',
             'fecha_fin' => 'required|date|after_or_equal:fecha_ini',
             'monto' => 'required|numeric|min:0.01',
-            'plan_pagos_id' => 'required|exists:plan_pagos,id'
+            'plan_pago_id' => 'required|exists:plan_pago,id'
         ]);
 
         $cuota = Cuota::create($request->validated());

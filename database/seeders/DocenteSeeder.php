@@ -10,7 +10,7 @@ class DocenteSeeder extends Seeder
 {
     public function run(): void
     {
-        // Primero crear las personas
+        // Primero crear las personas (sin usuario_id - la relación es inversa)
         $personas = [
             [
                 'ci' => '1234567',
@@ -21,7 +21,6 @@ class DocenteSeeder extends Seeder
                 'fecha_nacimiento' => '1980-05-15',
                 'direccion' => 'Av. 6 de Agosto N° 1234',
                 'fotografia' => null,
-                'usuario_id' => null,
             ],
             [
                 'ci' => '2345678',
@@ -32,7 +31,6 @@ class DocenteSeeder extends Seeder
                 'fecha_nacimiento' => '1985-08-20',
                 'direccion' => 'Calle Comercio N° 567',
                 'fotografia' => null,
-                'usuario_id' => null,
             ],
             [
                 'ci' => '3456789',
@@ -43,7 +41,6 @@ class DocenteSeeder extends Seeder
                 'fecha_nacimiento' => '1978-12-10',
                 'direccion' => 'Av. Mariscal Santa Cruz N° 890',
                 'fotografia' => null,
-                'usuario_id' => null,
             ],
         ];
         
@@ -53,7 +50,7 @@ class DocenteSeeder extends Seeder
             $personaIds[] = $id;
         }
 
-        // Crear docentes con códigos únicos de 5 dígitos
+        // Crear docentes con códigos únicos de 5 dígitos (sin usuario_id - la relación es inversa)
         $docentes = [
             [
                 'id' => $personaIds[0],
@@ -65,7 +62,6 @@ class DocenteSeeder extends Seeder
                 'fecha_nacimiento' => '1980-05-15',
                 'direccion' => 'Av. 6 de Agosto N° 1234',
                 'fotografia' => null,
-                'usuario_id' => null,
                 'registro_docente' => CodigoHelper::generarCodigoDocente(),
                 'cargo' => 'Profesor Titular',
                 'area_de_especializacion' => 'Educación Superior',
@@ -81,7 +77,6 @@ class DocenteSeeder extends Seeder
                 'fecha_nacimiento' => '1985-08-20',
                 'direccion' => 'Calle Comercio N° 567',
                 'fotografia' => null,
-                'usuario_id' => null,
                 'registro_docente' => CodigoHelper::generarCodigoDocente(),
                 'cargo' => 'Profesora Asociada',
                 'area_de_especializacion' => 'Tecnologías de la Información',
@@ -97,7 +92,6 @@ class DocenteSeeder extends Seeder
                 'fecha_nacimiento' => '1978-12-10',
                 'direccion' => 'Av. Mariscal Santa Cruz N° 890',
                 'fotografia' => null,
-                'usuario_id' => null,
                 'registro_docente' => CodigoHelper::generarCodigoDocente(),
                 'cargo' => 'Profesor Auxiliar',
                 'area_de_especializacion' => 'Gestión de Proyectos',

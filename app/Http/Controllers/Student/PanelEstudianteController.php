@@ -27,23 +27,35 @@ class PanelEstudianteController extends Controller
     public function index(Request $request)
     {
         try {
-            // Obtener el estudiante desde auth_user (agregado por RoleMiddleware)
-            $estudiante = $request->auth_user;
+            // Obtener el estudiante desde auth_user (agregado por StudentAuthMiddleware)
+            $estudiante = $request->auth_user ?? $request->auth_estudiante;
 
             // Si no está en auth_user, intentar obtenerlo desde el token
             if (!$estudiante || !($estudiante instanceof \App\Models\Estudiante)) {
                 try {
                     $payload = \Tymon\JWTAuth\Facades\JWTAuth::parseToken()->getPayload();
-                    $registroEstudiante = $payload->get('sub');
-                    $estudiante = \App\Models\Estudiante::find($registroEstudiante);
+                    $estudianteId = $payload->get('sub'); // Para estudiantes, sub es el id
+                    $estudiante = \App\Models\Estudiante::find($estudianteId);
+                    
+                    if ($estudiante) {
+                        Log::info('Estudiante obtenido desde token en dashboard', [
+                            'id' => $estudiante->id,
+                            'registro_estudiante' => $estudiante->registro_estudiante
+                        ]);
+                    }
                 } catch (\Exception $e) {
                     Log::error('Error obteniendo estudiante en dashboard', [
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
                     ]);
                 }
             }
 
             if (!$estudiante) {
+                Log::error('Estudiante no encontrado en dashboard', [
+                    'auth_user' => $request->auth_user ? get_class($request->auth_user) : null,
+                    'auth_estudiante' => $request->auth_estudiante ? get_class($request->auth_estudiante) : null
+                ]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Estudiante no encontrado'
@@ -55,40 +67,94 @@ class PanelEstudianteController extends Controller
 
             // Get document status
             // Estudiante hereda de Persona, usa el mismo id
-            $tiposRequeridos = TipoDocumento::where('nombre_entidad', 'Estudiante')->count();
-            $documentosSubidos = Documento::where('persona_id', $estudiante->id)->count();
+            // Obtener todos los tipos de documento (incluyendo el opcional "Título de Bachiller")
+            $tiposDocumento = TipoDocumento::whereIn('nombre_entidad', [
+                'Carnet de Identidad - Anverso',
+                'Carnet de Identidad - Reverso',
+                'Certificado de Nacimiento',
+                'Título de Bachiller'
+            ])->get();
+            
+            // Documentos requeridos (excluyendo "Título de Bachiller" que es opcional)
+            $tiposRequeridos = $tiposDocumento->filter(function($tipo) {
+                return $tipo->nombre_entidad !== 'Título de Bachiller';
+            });
+            $tiposRequeridosCount = $tiposRequeridos->count(); // Debe ser 3
+            
+            // Obtener documentos del estudiante agrupados por tipo
+            // Para cada tipo, obtener la última versión APROBADA (estado = '1')
+            $tiposRequeridosIds = $tiposRequeridos->pluck('tipo_documento_id')->toArray();
+            
+            // Lista de documentos requeridos con su estado (incluyendo el opcional)
+            // Para cada tipo, obtener la última versión (cualquier estado)
+            $documentosRequeridosLista = $tiposDocumento->map(function($tipo) use ($estudiante) {
+                // Obtener la última versión de este tipo de documento (cualquier estado: 0=pendiente, 1=aprobado, 2=rechazado)
+                $documento = Documento::where('persona_id', $estudiante->id)
+                    ->where('tipo_documento_id', $tipo->tipo_documento_id)
+                    ->orderBy('version', 'desc')
+                    ->first();
+                
+                return [
+                    'tipo_documento_id' => $tipo->tipo_documento_id,
+                    'nombre' => $tipo->nombre_entidad,
+                    'subido' => $documento !== null, // Cualquier documento subido cuenta
+                    'estado' => $documento ? $documento->estado : null,
+                    'observaciones' => $documento ? $documento->observaciones : null,
+                    'fecha_subida' => $documento && $documento->created_at ? $documento->created_at->toDateTimeString() : null,
+                    'documento_id' => $documento ? $documento->documento_id : null
+                ];
+            });
+            
+            // Contar documentos requeridos SUBIDOS (cualquier estado, excluyendo "Título de Bachiller")
+            $documentosSubidos = $documentosRequeridosLista->filter(function($doc) use ($tiposRequeridosIds) {
+                return in_array($doc['tipo_documento_id'], $tiposRequeridosIds) && $doc['subido'];
+            })->count();
+            
+            // Contar documentos validados (aprobados)
             $documentosValidados = Documento::where('persona_id', $estudiante->id)
-                                           ->where('estado', 'aprobado')
-                                           ->count();
+                                           ->whereIn('tipo_documento_id', $tiposRequeridosIds)
+                                           ->where('estado', '1') // '1' = aprobado
+                                           ->distinct('tipo_documento_id')
+                                           ->count('tipo_documento_id');
+            
+            // Obtener documentos rechazados (estado = '2')
             $documentosRechazados = Documento::where('persona_id', $estudiante->id)
-                                             ->where('estado', 'rechazado')
+                                             ->whereIn('tipo_documento_id', $tiposRequeridosIds)
+                                             ->where('estado', '2') // '2' = rechazado
                                              ->get();
+            
+            // Documentos faltantes (no subidos) - solo los requeridos (excluyendo el opcional)
+            $documentosFaltantes = $documentosRequeridosLista->filter(function($doc) {
+                // Excluir "Título de Bachiller" de los faltantes
+                return !$doc['subido'] && !str_contains(strtolower($doc['nombre']), 'título') && !str_contains(strtolower($doc['nombre']), 'bachiller');
+            })->values();
 
             // Get inscriptions count
-            $inscripcionesCount = Inscripcion::where('Estudiante_id', $estudiante->registro_estudiante)->count();
+            $inscripcionesCount = Inscripcion::where('estudiante_id', $estudiante->id)->count();
 
             // Get active groups count
-            // La tabla grupo_estudiante usa registro_estudiante
+            // La tabla grupo_estudiante usa estudiante_id (id de Estudiante, no registro_estudiante)
             // La tabla grupo usa grupo_id como primary key (no id)
             $gruposActivos = DB::table('grupo_estudiante')
                               ->join('grupo', 'grupo_estudiante.grupo_id', '=', 'grupo.grupo_id')
-                              ->where('grupo_estudiante.registro_estudiante', $estudiante->registro_estudiante)
+                              ->where('grupo_estudiante.estudiante_id', $estudiante->id)
                               ->where('grupo.fecha_fin', '>=', now())
                               ->count();
 
             // Get pending payments
             // Usar nombres de tablas en minúsculas (PostgreSQL)
+            // La tabla se llama 'plan_pago' (singular), no 'plan_pagos'
             // La tabla pagos usa cuota_id (singular), no cuotas_id
             $pagosPendientes = DB::table('cuotas')
-                                ->join('plan_pagos', 'cuotas.plan_pagos_id', '=', 'plan_pagos.id')
-                                ->join('inscripcion', 'plan_pagos.inscripcion_id', '=', 'inscripcion.id')
+                                ->join('plan_pago', 'cuotas.plan_pago_id', '=', 'plan_pago.id')
+                                ->join('inscripcion', 'plan_pago.inscripcion_id', '=', 'inscripcion.id')
                                 ->leftJoin('pagos', 'cuotas.id', '=', 'pagos.cuota_id')
-                                ->where('inscripcion.Estudiante_id', $estudiante->registro_estudiante)
+                                ->where('inscripcion.estudiante_id', $estudiante->id)
                                 ->whereNull('pagos.id')
                                 ->count();
 
-            // Determine alert based on Estado_id
-            $alert = $this->getAlertByEstado($estudiante->Estado_id, $tiposRequeridos, $documentosSubidos, $documentosValidados, $documentosRechazados);
+            // Determine alert based on estado_id
+            $alert = $this->getAlertByEstado($estudiante->estado_id, $tiposRequeridosCount, $documentosSubidos, $documentosValidados, $documentosRechazados, $documentosFaltantes);
 
             return response()->json([
                 'success' => true,
@@ -97,22 +163,26 @@ class PanelEstudianteController extends Controller
                         'id' => $estudiante->registro_estudiante,
                         'nombre_completo' => $estudiante->nombre_completo,
                         'registro_estudiante' => $estudiante->registro_estudiante,
-                        'Estado_id' => $estudiante->Estado_id,
+                        'estado_id' => $estudiante->estado_id,
                         'estado_nombre' => $estudiante->estadoEstudiante->nombre_estado ?? 'Desconocido'
                     ],
                     'estadisticas' => [
-                        'documentos_requeridos' => $tiposRequeridos,
+                        'documentos_requeridos' => $tiposRequeridosCount,
                         'documentos_subidos' => $documentosSubidos,
                         'documentos_validados' => $documentosValidados,
                         'inscripciones' => $inscripcionesCount,
                         'grupos_activos' => $gruposActivos,
                         'pagos_pendientes' => $pagosPendientes
                     ],
+                    'documentos' => [
+                        'requeridos' => $documentosRequeridosLista,
+                        'faltantes' => $documentosFaltantes
+                    ],
                     'alert' => $alert,
                     'menu_habilitado' => [
                         'documentos' => true,
-                        'programas' => $estudiante->Estado_id == 4,
-                        'inscripciones' => $estudiante->Estado_id == 4,
+                        'programas' => $estudiante->estado_id == 4,
+                        'inscripciones' => $estudiante->estado_id == 4,
                         'pagos' => $inscripcionesCount > 0,
                         'notas' => $gruposActivos > 0
                     ]
@@ -131,26 +201,50 @@ class PanelEstudianteController extends Controller
     /**
      * Get alert configuration based on student state
      */
-    private function getAlertByEstado($estadoId, $tiposRequeridos, $documentosSubidos, $documentosValidados, $documentosRechazados)
+    private function getAlertByEstado($estadoId, $tiposRequeridos, $documentosSubidos, $documentosValidados, $documentosRechazados, $documentosFaltantes = [])
     {
+        // Lista de documentos requeridos con nombres específicos
+        $nombresDocumentos = [
+            'Fotocopia de cédula de identidad',
+            'Certificado de nacimiento',
+            '2 fotografías tamaño 3x3 (fondo gris)',
+            'Título de bachiller (solo para técnico medio)'
+        ];
+        
         switch ($estadoId) {
             case 1: // Pre-registrado
+                $listaFaltantes = $documentosFaltantes->map(function($doc) use ($nombresDocumentos) {
+                    return $doc['nombre'] ?? 'Documento requerido';
+                })->toArray();
+                
+                // Si no hay documentos faltantes específicos, usar la lista estándar
+                if (empty($listaFaltantes)) {
+                    $listaFaltantes = $nombresDocumentos;
+                }
+                
                 return [
                     'type' => 'error',
-                    'title' => 'URGENTE: Debe subir sus documentos',
-                    'message' => 'Debe subir sus documentos para completar su registro',
+                    'title' => '⚠️ URGENTE: Debe subir sus documentos',
+                    'message' => 'Para completar tu registro y poder inscribirte a programas, debes subir los siguientes documentos:',
+                    'documentos_faltantes' => $listaFaltantes,
                     'icon' => 'mdi-alert-circle',
-                    'actions' => ['upload_documents']
+                    'actions' => ['upload_documents'],
+                    'edad_minima' => 'Edad mínima: 14 años'
                 ];
 
             case 2: // Documentos incompletos
                 $faltantes = $tiposRequeridos - $documentosSubidos;
+                $listaFaltantes = $documentosFaltantes->map(function($doc) {
+                    return $doc['nombre'] ?? 'Documento requerido';
+                })->toArray();
+                
                 return [
                     'type' => 'warning',
-                    'title' => 'ATENCIÓN: Documentos pendientes',
-                    'message' => "Tiene {$faltantes} documento(s) pendiente(s) de subir. Progreso: {$documentosSubidos} de {$tiposRequeridos}",
+                    'title' => '⚠️ ATENCIÓN: Documentos pendientes',
+                    'message' => "Tienes {$faltantes} documento(s) pendiente(s) de subir. Progreso: {$documentosSubidos} de {$tiposRequeridos}",
+                    'documentos_faltantes' => $listaFaltantes,
                     'icon' => 'mdi-file-alert',
-                    'progress' => ($documentosSubidos / $tiposRequeridos) * 100,
+                    'progress' => $tiposRequeridos > 0 ? ($documentosSubidos / $tiposRequeridos) * 100 : 0,
                     'actions' => ['upload_documents']
                 ];
 

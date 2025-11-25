@@ -218,7 +218,7 @@ class DocenteController extends Controller
             // Generar código único de 5 dígitos para el docente
             $registroDocente = CodigoHelper::generarCodigoDocente();
 
-            // Crear Persona primero
+            // Crear Persona primero (sin usuario_id - la relación es inversa)
             $persona = Persona::create([
                 'ci' => trim($request->ci),
                 'nombre' => trim($request->nombre),
@@ -227,13 +227,13 @@ class DocenteController extends Controller
                 'sexo' => $request->sexo,
                 'fecha_nacimiento' => $request->fecha_nacimiento,
                 'direccion' => $request->direccion ? trim($request->direccion) : null,
-                'fotografia' => $request->fotografia,
-                'usuario_id' => $request->usuario_id
+                'fotografia' => $request->fotografia
             ]);
 
-            // Crear Docente
-            $docente = Docente::create([
-                'id' => $persona->id,
+            // Crear Docente heredando de Persona (usando el mismo id)
+            // Con PostgreSQL INHERITS, debemos insertar directamente usando DB
+            DB::table('docente')->insert([
+                'id' => $persona->id, // Usar el mismo ID de persona
                 'ci' => trim($request->ci),
                 'nombre' => trim($request->nombre),
                 'apellido' => trim($request->apellido),
@@ -242,12 +242,20 @@ class DocenteController extends Controller
                 'fecha_nacimiento' => $request->fecha_nacimiento,
                 'direccion' => $request->direccion ? trim($request->direccion) : null,
                 'fotografia' => $request->fotografia,
-                'usuario_id' => $request->usuario_id,
                 'registro_docente' => $registroDocente,
                 'cargo' => $request->cargo ? trim($request->cargo) : null,
                 'area_de_especializacion' => $request->area_de_especializacion ? trim($request->area_de_especializacion) : null,
-                'modalidad_de_contratacion' => $request->modalidad_de_contratacion ? trim($request->modalidad_de_contratacion) : null
+                'modalidad_de_contratacion' => $request->modalidad_de_contratacion ? trim($request->modalidad_de_contratacion) : null,
+                'created_at' => now(),
+                'updated_at' => now()
             ]);
+
+            // Cargar el modelo Docente
+            $docente = Docente::find($persona->id);
+            if (!$docente) {
+                DB::rollBack();
+                throw new \Exception('Error: No se pudo cargar el docente después de la inserción.');
+            }
 
             Cache::forget('docentes_*');
 

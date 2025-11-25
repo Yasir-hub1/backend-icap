@@ -24,7 +24,7 @@ class NotaController extends Controller
             $estudiante = $request->auth_user;
 
             $grupos = $estudiante->grupos()
-                ->with(['programa', 'docente', 'horario'])
+                ->with(['programa', 'docente', 'horarios'])
                 ->orderBy('fecha_ini', 'desc')
                 ->get()
                 ->map(function ($grupo) {
@@ -32,7 +32,7 @@ class NotaController extends Controller
                     $estado = $grupo->pivot->estado;
 
                     return [
-                        'grupo_id' => $grupo->id,
+                        'grupo_id' => $grupo->grupo_id,
                         'programa' => [
                             'id' => $grupo->programa->id,
                             'nombre' => $grupo->programa->nombre
@@ -44,7 +44,7 @@ class NotaController extends Controller
                         'estado' => $estado,
                         'aprobado' => $nota !== null ? ($nota >= 51) : null,
                         'tiene_nota' => $nota !== null,
-                        'horario' => $grupo->horario
+                        'horarios' => $grupo->horarios
                     ];
                 });
 
@@ -92,8 +92,8 @@ class NotaController extends Controller
             $estudiante = $request->auth_user;
 
             $grupo = $estudiante->grupos()
-                ->with(['programa', 'docente', 'horario'])
-                ->where('Grupo_id', $grupoId)
+                ->with(['programa', 'docente', 'horarios'])
+                ->where('grupo_id', $grupoId)
                 ->firstOrFail();
 
             $nota = $grupo->pivot->nota;
@@ -103,13 +103,13 @@ class NotaController extends Controller
                 'message' => 'Detalle de nota obtenido exitosamente',
                 'data' => [
                     'grupo' => [
-                        'id' => $grupo->id,
+                        'id' => $grupo->grupo_id,
                         'fecha_ini' => $grupo->fecha_ini,
                         'fecha_fin' => $grupo->fecha_fin
                     ],
                     'programa' => $grupo->programa,
                     'docente' => $grupo->docente,
-                    'horario' => $grupo->horario,
+                    'horarios' => $grupo->horarios,
                     'calificacion' => [
                         'nota' => $nota,
                         'estado' => $grupo->pivot->estado,

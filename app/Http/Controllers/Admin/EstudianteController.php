@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
 use App\Models\Documento;
+use App\Models\TipoDocumento;
 use App\Models\Notificacion;
 use App\Models\EstadoEstudiante;
 use App\Helpers\CodigoHelper;
@@ -63,6 +64,12 @@ class EstudianteController extends Controller
 
             // Agregar información adicional
             $estudiantes->getCollection()->transform(function ($estudiante) {
+                // Calcular si está activo: Estado_id es 4 O si el nombre del estado es "validado" Y tiene documentos completos
+                $estadoId = $estudiante->Estado_id ?? 1;
+                $estadoNombre = strtolower($estudiante->estadoEstudiante->nombre_estado ?? '');
+                $documentosCompletos = $this->verificarDocumentosCompletos($estudiante->registro_estudiante);
+                $activo = $estadoId == 4 || ($estadoNombre === 'validado' && $documentosCompletos);
+                
                 return [
                     'id' => $estudiante->id, // ID real del estudiante (persona_id), usado en inscripcion.estudiante_id
                     'persona_id' => $estudiante->id, // Alias para claridad
@@ -72,13 +79,13 @@ class EstudianteController extends Controller
                     'celular' => $estudiante->celular,
                     'provincia' => $estudiante->provincia,
                     'estado' => $estudiante->estadoEstudiante ? $estudiante->estadoEstudiante->nombre_estado : 'Sin estado',
-                    'estado_id' => $estudiante->Estado_id ?? 1,
+                    'estado_id' => $estadoId,
                     'registro_estudiante' => $estudiante->registro_estudiante,
                     'fecha_inscripcion' => $estudiante->created_at ? $estudiante->created_at->format('d M Y') : 'N/A',
                     'fotografia' => $estudiante->fotografia || null,
                     'email' => $estudiante->usuario ? $estudiante->usuario->email : 'N/A',
-                    'activo' => ($estudiante->Estado_id ?? 1) == 2, // Activo si Estado_id es 2
-                    'documentos_completos' => $this->verificarDocumentosCompletos($estudiante->registro_estudiante),
+                    'activo' => $activo, // Activo si Estado_id es 4 O si el nombre del estado es "validado" Y tiene documentos completos
+                    'documentos_completos' => $documentosCompletos,
                     'programa_actual' => $this->obtenerProgramaActual($estudiante->registro_estudiante)
                 ];
             });
@@ -195,7 +202,7 @@ class EstudianteController extends Controller
                 'estado_id' => $estudiante->Estado_id ?? 1,
                 'email' => $estudiante->usuario ? $estudiante->usuario->email : 'N/A',
                 'fecha_inscripcion' => $estudiante->created_at ? $estudiante->created_at->format('d M Y') : 'N/A',
-                'activo' => ($estudiante->Estado_id ?? 1) == 2,
+                'activo' => ($estudiante->Estado_id ?? 1) == 4, // Activo si Estado_id es 4 (Validado - Apto para inscripción)
                 'documentos_completos' => $this->verificarDocumentosCompletos($estudiante->registro_estudiante),
                 'programa_actual' => $inscripcionActiva && $inscripcionActiva->programa
                     ? $inscripcionActiva->programa->nombre
@@ -485,8 +492,8 @@ class EstudianteController extends Controller
                 ], 400);
             }
 
-            // Cambiar estado a activo (asumiendo que 2 es "Activo")
-            $estudiante->update(['Estado_id' => 2]);
+            // Cambiar estado a activo (estado_id = 4 es "Validado - Apto para inscripción")
+            $estudiante->update(['Estado_id' => 4]);
 
             // Registrar en bitácora
             $this->registrarAccion('estudiante', $estudiante->id, 'ACTIVAR', "Estudiante: {$estudiante->nombre} {$estudiante->apellido} - CI: {$estudiante->ci}");
@@ -562,19 +569,36 @@ class EstudianteController extends Controller
      */
     private function verificarDocumentosCompletos($estudianteId)
     {
-        // Aquí puedes definir qué documentos son requeridos
-        $documentosRequeridos = ['CI', 'Certificado de Nacimiento', 'Fotografía'];
+        // Documentos requeridos (excluyendo "Título de Bachiller" que es opcional)
+        $tiposRequeridos = TipoDocumento::whereIn('nombre_entidad', [
+            'Carnet de Identidad - Anverso',
+            'Carnet de Identidad - Reverso',
+            'Certificado de Nacimiento'
+        ])->pluck('tipo_documento_id');
 
         $estudiante = Estudiante::where('registro_estudiante', $estudianteId)->first();
         if (!$estudiante) return false;
 
-        // Estudiante hereda de Persona, usa el mismo id
-        $documentosSubidos = Documento::where('persona_id', $estudiante->id)
-            ->where('estado', 'aprobado')
-            ->count();
+        // Verificar que todos los documentos requeridos estén aprobados (estado = '1')
+        // Obtener la última versión de cada tipo de documento requerido
+        $documentosAprobados = Documento::where('persona_id', $estudiante->id)
+            ->whereIn('tipo_documento_id', $tiposRequeridos)
+            ->where('estado', '1') // 1 = aprobado
+            ->get()
+            ->groupBy('tipo_documento_id')
+            ->map(function ($docs) {
+                // Obtener la última versión (mayor número de versión)
+                return $docs->sortByDesc(function ($doc) {
+                    return (float) $doc->version;
+                })->first();
+            })
+            ->filter(function ($doc) {
+                // Solo contar documentos que estén aprobados
+                return $doc && $doc->estado == '1';
+            });
 
-        // Por ahora, consideramos que tiene documentos completos si tiene al menos 3 documentos aprobados
-        return $documentosSubidos >= 3;
+        // Verificar que todos los documentos requeridos estén aprobados
+        return $documentosAprobados->count() === $tiposRequeridos->count();
     }
 
     /**

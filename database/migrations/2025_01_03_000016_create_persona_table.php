@@ -21,20 +21,25 @@ return new class extends Migration
             $table->date('fecha_nacimiento')->nullable();
             $table->text('direccion')->nullable();
             $table->string('fotografia', 500)->nullable();
-            $table->unsignedBigInteger('usuario_id')->nullable();
+            // NO incluir usuario_id aquí - la relación es unidireccional: usuario tiene persona_id
+            // Esto evita relaciones circulares y mantiene la coherencia del diseño
+            // La relación es: usuario.persona_id -> persona.id (usuario pertenece a persona)
             $table->timestamps();
 
             // Indexes
             $table->index('ci');
             $table->index(['nombre', 'apellido']);
             $table->index('fecha_nacimiento');
-            $table->index('usuario_id');
         });
-
-        // Agregar foreign key a Usuario
-        Schema::table('persona', function (Blueprint $table) {
-            $table->foreign('usuario_id')->references('usuario_id')->on('usuario')->onDelete('set null');
-        });
+        
+        // NOTA: La relación persona <-> usuario es unidireccional:
+        // - usuario.persona_id -> persona.id (usuario pertenece a persona)
+        // - NO hay persona.usuario_id (evita relación circular)
+        // Esta estructura permite que:
+        //   1. Una persona puede tener 0 o 1 usuario (a través de usuario.persona_id)
+        //   2. Un usuario pertenece a una persona (usuario.persona_id)
+        //   3. Estudiante y Docente heredan de Persona (INHERITS)
+        //   4. Usuario se relaciona con Persona (y por herencia, con Estudiante/Docente)
     }
 
     /**

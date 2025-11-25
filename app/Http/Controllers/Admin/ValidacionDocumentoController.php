@@ -5,12 +5,14 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Estudiante;
 use App\Models\Documento;
+use App\Models\TipoDocumento;
 use App\Models\Bitacora;
 use App\Traits\RegistraBitacora;
 use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class ValidacionDocumentoController extends Controller
 {
@@ -36,8 +38,29 @@ class ValidacionDocumentoController extends Controller
             $perPage = $request->input('per_page', 15);
             $search = $request->input('search', '');
 
-            $estudiantes = Estudiante::with(['documentos.tipoDocumento', 'estado'])
-                ->where('estado_id', 3) // Estado: Documentos pendientes de validación
+            // SEGÚN EL FLUJO:
+            // - estado_id = 3 (En revisión): Estudiante completó los 3 documentos requeridos y están pendientes de validación
+            // - estado_id = 5 (Rechazado): Documentos fueron rechazados, pero si volvió a subir documentos, pueden estar pendientes
+            //
+            // El endpoint debe mostrar estudiantes que:
+            // 1. Tengan estado_id = 3 (En revisión) - estos son los que completaron los 3 documentos
+            // 2. Y que tengan al menos un documento con estado = '0' (pendiente de revisión)
+            // 3. También incluir estado_id = 5 si tienen documentos pendientes (volvieron a subir después del rechazo)
+
+            $estudiantes = Estudiante::with(['estado', 'usuario'])
+                ->where(function ($query) {
+                    // Estudiantes en estado 3 (En revisión) - completaron los 3 documentos
+                    $query->where('estado_id', 3)
+                          // O estudiantes en estado 5 (Rechazado) que volvieron a subir documentos
+                          ->orWhere('estado_id', 5);
+                })
+                ->whereHas('documentos', function ($query) {
+                    // Que tengan al menos un documento pendiente (estado = '0')
+                    $query->where(function ($q) {
+                        $q->where('estado', '0')
+                          ->orWhere('estado', 0);
+                    });
+                })
                 ->when($search, function ($query) use ($search) {
                     $query->where(function ($q) use ($search) {
                         $q->where('nombre', 'ILIKE', "%{$search}%")
@@ -47,10 +70,31 @@ class ValidacionDocumentoController extends Controller
                     });
                 })
                 ->withCount(['documentos as documentos_pendientes' => function ($query) {
-                    $query->where('estado', '0'); // 0 = pendiente
+                    // Contar documentos pendientes (estado = '0' o 0)
+                    $query->where(function ($q) {
+                        $q->where('estado', '0')
+                          ->orWhere('estado', 0);
+                    });
                 }])
                 ->orderBy('created_at', 'desc')
                 ->paginate($perPage);
+
+            // Transformar los datos para incluir información adicional
+            $estudiantes->getCollection()->transform(function ($estudiante) {
+                return [
+                    'id' => $estudiante->id,
+                    'nombre' => $estudiante->nombre,
+                    'apellido' => $estudiante->apellido,
+                    'ci' => $estudiante->ci,
+                    'registro_estudiante' => $estudiante->registro_estudiante,
+                    'estado_id' => $estudiante->estado_id,
+                    'estado' => $estudiante->estado ? $estudiante->estado->nombre_estado : null,
+                    'documentos_pendientes' => $estudiante->documentos_pendientes ?? 0,
+                    'email' => $estudiante->usuario ? $estudiante->usuario->email : null,
+                    'celular' => $estudiante->celular,
+                    'provincia' => $estudiante->provincia
+                ];
+            });
 
             return response()->json([
                 'success' => true,
@@ -59,6 +103,9 @@ class ValidacionDocumentoController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
+            Log::error('Error en ValidacionDocumentoController::index: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener estudiantes con documentos pendientes',
@@ -109,7 +156,7 @@ class ValidacionDocumentoController extends Controller
                             'estado' => $doc->estado, // 0: pendiente, 1: aprobado, 2: rechazado
                             'observaciones' => $doc->observaciones,
                             'fecha_subida' => $doc->created_at,
-                            'url_descarga' => $doc->path_documento ? Storage::url($doc->path_documento) : null
+                            'url_descarga' => $doc->path_documento ? url(Storage::url($doc->path_documento)) : null
                         ];
                     })->values()
                 ];
@@ -140,8 +187,21 @@ class ValidacionDocumentoController extends Controller
     }
 
     /**
+     * Aprobar un documento individual (alias para approve)
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $documentoId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function aprobar(Request $request, $documentoId)
+    {
+        return $this->approve($request, $documentoId);
+    }
+
+    /**
      * Aprobar un documento individual
      *
+     * @param  \Illuminate\Http\Request  $request
      * @param  int  $documentoId
      * @return \Illuminate\Http\JsonResponse
      */
@@ -175,6 +235,22 @@ class ValidacionDocumentoController extends Controller
             // Enviar notificación al estudiante
             if ($estudiante) {
                 $this->notificarDocumentoAprobado($estudiante, $documento->tipoDocumento->nombre_entidad ?? 'Documento');
+
+                // Verificar si todos los documentos requeridos están aprobados
+                if ($this->verificarDocumentosCompletos($estudiante->id)) {
+                    // Cambiar estado del estudiante a 4 (Apto para inscripción)
+                    if ($estudiante->estado_id != 4) {
+                        $estudiante->estado_id = 4;
+                        $estudiante->save();
+
+                        // Registrar en bitácora
+                        $descripcionEstado = "Todos los documentos requeridos del estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) fueron APROBADOS. Estado cambiado a 'Apto para inscripción' (Estado_id=4).";
+                        $this->registrarAccion('estudiante', $estudiante->id, 'APROBAR_DOCUMENTOS', $descripcionEstado);
+
+                        // Enviar notificación al estudiante de que todos sus documentos están aprobados
+                        $this->notificarDocumentosCompletos($estudiante);
+                    }
+                }
             }
 
             DB::commit();
@@ -182,7 +258,8 @@ class ValidacionDocumentoController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Documento aprobado exitosamente',
-                'data' => $documento
+                'data' => $documento,
+                'estudiante_activado' => $estudiante && $estudiante->estado_id == 4
             ], 200);
 
         } catch (\Exception $e) {
@@ -215,7 +292,7 @@ class ValidacionDocumentoController extends Controller
     public function reject(Request $request)
     {
         $request->validate([
-            'documento_id' => 'required|exists:documento,id',
+            'documento_id' => 'required|exists:documento,documento_id',
             'motivo' => 'required|string|min:10|max:500'
         ]);
 
@@ -258,8 +335,18 @@ class ValidacionDocumentoController extends Controller
                 " fue RECHAZADO. Motivo: {$request->motivo}. Nueva versión {$nuevaVersion} creada.";
             $this->registrarAccion('documento', $documento->documento_id, 'RECHAZAR', $descripcion);
 
-            // Enviar notificación al estudiante
+            // SEGÚN EL FLUJO: Cuando se rechaza un documento, cambiar estado del estudiante a 5 (Rechazado)
+            // El estudiante recibirá notificación y deberá volver a subir los documentos
             if ($estudiante) {
+                // Cambiar estado a 5 (Rechazado) si no está ya en ese estado
+                if ($estudiante->estado_id != 5) {
+                    $estudiante->update(['estado_id' => 5]);
+
+                    // Registrar cambio de estado en bitácora
+                    $descripcionEstado = "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) cambió a estado 'Rechazado' (estado_id=5) debido al rechazo del documento '{$documento->tipoDocumento->nombre_entidad}'. Motivo: {$request->motivo}";
+                    $this->registrarAccion('estudiante', $estudiante->id, 'RECHAZAR_DOCUMENTO', $descripcionEstado);
+                }
+
                 $this->notificarDocumentoRechazado($estudiante, $documento->tipoDocumento->nombre_entidad ?? 'Documento', $request->motivo);
             }
 
@@ -380,5 +467,47 @@ class ValidacionDocumentoController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Verificar si todos los documentos requeridos están aprobados
+     *
+     * @param  int  $estudianteId
+     * @return bool
+     */
+    private function verificarDocumentosCompletos($estudianteId)
+    {
+        // Documentos requeridos (excluyendo "Título de Bachiller" que es opcional)
+        $tiposRequeridos = TipoDocumento::whereIn('nombre_entidad', [
+            'Carnet de Identidad - Anverso',
+            'Carnet de Identidad - Reverso',
+            'Certificado de Nacimiento'
+        ])->pluck('tipo_documento_id');
+
+        $estudiante = Estudiante::find($estudianteId);
+        if (!$estudiante) {
+            return false;
+        }
+
+        // Verificar que todos los documentos requeridos estén aprobados (estado = '1')
+        // Obtener la última versión de cada tipo de documento requerido
+        $documentosAprobados = Documento::where('persona_id', $estudiante->id)
+            ->whereIn('tipo_documento_id', $tiposRequeridos)
+            ->where('estado', '1') // 1 = aprobado
+            ->get()
+            ->groupBy('tipo_documento_id')
+            ->map(function ($docs) {
+                // Obtener la última versión (mayor número de versión)
+                return $docs->sortByDesc(function ($doc) {
+                    return (float) $doc->version;
+                })->first();
+            })
+            ->filter(function ($doc) {
+                // Solo contar documentos que estén aprobados
+                return $doc && $doc->estado == '1';
+            });
+
+        // Verificar que todos los documentos requeridos estén aprobados
+        return $documentosAprobados->count() === $tiposRequeridos->count();
     }
 }

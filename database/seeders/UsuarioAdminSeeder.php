@@ -16,7 +16,7 @@ class UsuarioAdminSeeder extends Seeder
      */
     public function run(): void
     {
-        // Buscar o crear persona para el admin
+        // Buscar o crear persona para el admin (sin usuario_id - la relación es inversa)
         $personaAdmin = Persona::updateOrCreate(
             ['ci' => '0000000'],
             [
@@ -25,8 +25,7 @@ class UsuarioAdminSeeder extends Seeder
                 'celular' => '70000000',
                 'sexo' => 'M',
                 'fecha_nacimiento' => '1990-01-01',
-                'direccion' => 'Sistema',
-                'usuario_id' => null // Se actualizará después
+                'direccion' => 'Sistema'
             ]
         );
 
@@ -38,7 +37,7 @@ class UsuarioAdminSeeder extends Seeder
             return;
         }
 
-        // Crear usuario admin
+        // Crear usuario admin con persona_id (relación unidireccional: usuario -> persona)
         $usuarioAdmin = Usuario::updateOrCreate(
             ['email' => 'admin@sistema.edu'],
             [
@@ -47,10 +46,9 @@ class UsuarioAdminSeeder extends Seeder
                 'rol_id' => $rolAdmin->rol_id
             ]
         );
-
-        // Actualizar persona con usuario_id
-        $personaAdmin->usuario_id = $usuarioAdmin->usuario_id;
-        $personaAdmin->save();
+        
+        // NOTA: No actualizar persona.usuario_id porque la relación es inversa
+        // La relación es: usuario.persona_id -> persona.id
 
         $this->command->info('Usuario ADMIN creado exitosamente:');
         $this->command->info('Email: admin@sistema.edu');
