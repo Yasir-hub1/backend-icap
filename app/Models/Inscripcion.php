@@ -15,13 +15,20 @@ class Inscripcion extends Model
     protected $fillable = [
         'fecha',
         'estudiante_id',
-        'programa_id'
+        'programa_id',
+        'descuento_id',
+        'costo_base',
+        'costo_final'
     ];
 
     protected $casts = [
         'id' => 'integer',
         'estudiante_id' => 'integer',
         'programa_id' => 'integer',
+
+        'descuento_id' => 'integer',
+        'costo_base' => 'decimal:2',
+        'costo_final' => 'decimal:2',
         'fecha' => 'date'
     ];
 
@@ -50,9 +57,29 @@ class Inscripcion extends Model
     }
 
     /**
-     * Relación con descuento (uno a uno)
+     * Obtener grupos del estudiante para este programa
+     * La relación estudiante-grupo se maneja a través de grupo_estudiante (pivot table)
+     * No hay relación directa entre inscripcion y grupo
      */
-    public function descuento(): HasOne
+    public function obtenerGrupos()
+    {
+        return $this->estudiante->grupos()
+            ->where('programa_id', $this->programa_id)
+            ->get();
+    }
+
+    /**
+     * Relación con descuento aplicado (muchos a uno)
+     */
+    public function descuento(): BelongsTo
+    {
+        return $this->belongsTo(Descuento::class, 'descuento_id', 'id');
+    }
+
+    /**
+     * Relación con descuento antiguo (uno a uno) - Mantener por compatibilidad
+     */
+    public function descuentoAntiguo(): HasOne
     {
         return $this->hasOne(Descuento::class, 'inscripcion_id', 'id');
     }

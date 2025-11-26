@@ -135,10 +135,14 @@ class InscripcionController extends Controller
                         'cuotas_pagadas' => $cuotasPagadas,
                         'cuotas_pendientes' => $totalCuotas - $cuotasPagadas,
                     ] : null,
+                    'costo_base' => $inscripcion->costo_base,
+                    'costo_final' => $inscripcion->costo_final,
                     'descuento' => $inscripcion->descuento ? [
                         'id' => $inscripcion->descuento->id,
                         'nombre' => $inscripcion->descuento->nombre,
                         'descuento' => $inscripcion->descuento->descuento,
+                        'fecha_inicio' => $inscripcion->descuento->fecha_inicio,
+                        'fecha_fin' => $inscripcion->descuento->fecha_fin,
                     ] : null,
                     'estado_pagos' => $planPago ? [
                         'total_cuotas' => $totalCuotas,
@@ -271,10 +275,14 @@ class InscripcionController extends Controller
                         ];
                     }),
                 ] : null,
+                'costo_base' => $inscripcion->costo_base,
+                'costo_final' => $inscripcion->costo_final,
                 'descuento' => $inscripcion->descuento ? [
                     'id' => $inscripcion->descuento->id,
                     'nombre' => $inscripcion->descuento->nombre,
                     'descuento' => $inscripcion->descuento->descuento,
+                    'fecha_inicio' => $inscripcion->descuento->fecha_inicio,
+                    'fecha_fin' => $inscripcion->descuento->fecha_fin,
                 ] : null,
                 'estado_pagos' => $planPago ? [
                     'total_cuotas' => $totalCuotas,

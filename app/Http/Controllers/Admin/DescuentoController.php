@@ -23,7 +23,7 @@ class DescuentoController extends Controller
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
 
-            $query = Descuento::with(['inscripcion.estudiante', 'inscripcion.programa']);
+            $query = Descuento::with(['programa', 'inscripciones.estudiante', 'inscripciones.programa', 'inscripcion.estudiante', 'inscripcion.programa']);
 
             if ($search) {
                 $query->where(function ($q) use ($search) {
@@ -58,7 +58,7 @@ class DescuentoController extends Controller
     public function obtener(int $id): JsonResponse
     {
         try {
-            $descuento = Descuento::with(['inscripcion.estudiante', 'inscripcion.programa'])->findOrFail($id);
+            $descuento = Descuento::with(['programa', 'inscripciones.estudiante', 'inscripciones.programa', 'inscripcion.estudiante', 'inscripcion.programa'])->findOrFail($id);
 
             return response()->json([
                 'success' => true,
@@ -112,14 +112,16 @@ class DescuentoController extends Controller
     }
 
     /**
-     * Crear nuevo descuento
+     * Crear nuevo descuento por programa (FASE 3.1)
      */
     public function crear(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'inscripcion_id' => 'required|exists:inscripcion,id|unique:descuento,inscripcion_id',
+            'programa_id' => 'required|exists:programa,id',
             'nombre' => 'required|string|max:100',
-            'descuento' => 'required|numeric|min:0|max:100'
+            'descuento' => 'required|numeric|min:0|max:100',
+            'fecha_inicio' => 'required|date',
+            'fecha_fin' => 'required|date|after_or_equal:fecha_inicio'
         ]);
 
         if ($validator->fails()) {
@@ -138,11 +140,11 @@ class DescuentoController extends Controller
             DB::commit();
 
             // Registrar en bitácora
-            $this->registrarCreacion('descuento', $descuento->id, "Descuento: {$descuento->nombre} - {$descuento->descuento}%");
+            $this->registrarCreacion('descuento', $descuento->id, "Descuento: {$descuento->nombre} - {$descuento->descuento}% para programa ID: {$descuento->programa_id}");
 
             return response()->json([
                 'success' => true,
-                'data' => $descuento->load(['inscripcion.estudiante', 'inscripcion.programa']),
+                'data' => $descuento->load(['programa', 'inscripcion.estudiante', 'inscripcion.programa']),
                 'message' => 'Descuento creado exitosamente'
             ], 201);
         } catch (\Exception $e) {
@@ -162,8 +164,11 @@ class DescuentoController extends Controller
         $descuento = Descuento::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
+            'programa_id' => 'required|exists:programa,id',
             'nombre' => 'required|string|max:100',
-            'descuento' => 'required|numeric|min:0|max:100'
+            'descuento' => 'required|numeric|min:0|max:100',
+            'fecha_inicio' => 'required|date',
+            'fecha_fin' => 'required|date|after_or_equal:fecha_inicio'
         ]);
 
         if ($validator->fails()) {
@@ -187,7 +192,7 @@ class DescuentoController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $descuentoActualizado->load(['inscripcion.estudiante', 'inscripcion.programa']),
+                'data' => $descuentoActualizado->load(['programa', 'inscripciones.estudiante', 'inscripciones.programa']),
                 'message' => 'Descuento actualizado exitosamente'
             ]);
         } catch (\Exception $e) {

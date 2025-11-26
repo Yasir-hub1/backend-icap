@@ -101,6 +101,28 @@ class Programa extends Model
     }
 
     /**
+     * Relación con descuentos (uno a muchos)
+     */
+    public function descuentos(): HasMany
+    {
+        return $this->hasMany(Descuento::class, 'programa_id', 'id');
+    }
+
+    /**
+     * Obtener el mejor descuento vigente para este programa
+     * Retorna el descuento con mayor porcentaje que esté vigente
+     */
+    public function obtenerMejorDescuentoVigente()
+    {
+        return $this->descuentos()
+                    ->where('descuento', '>', 0)
+                    ->where('fecha_inicio', '<=', now()->toDateString())
+                    ->where('fecha_fin', '>=', now()->toDateString())
+                    ->orderBy('descuento', 'desc')
+                    ->first();
+    }
+
+    /**
      * Relación con programas padre (many-to-many)
      */
     public function programasPadre(): BelongsToMany

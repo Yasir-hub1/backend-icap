@@ -109,6 +109,9 @@ Route::middleware([\App\Http\Middleware\StudentAuthMiddleware::class])->prefix('
     // Mis inscripciones
     Route::prefix('inscripciones')->group(function () {
         Route::get('/programas-disponibles', [EstudianteInscripcionController::class, 'programasDisponibles']);
+        Route::get('/descuentos-disponibles', [EstudianteInscripcionController::class, 'descuentosDisponibles']);
+        Route::get('/reglas-cuotas/{programaId}', [EstudianteInscripcionController::class, 'reglasCuotas']);
+        Route::get('/grupos/{grupoId}', [EstudianteInscripcionController::class, 'obtenerGrupo']);
         Route::post('/verificar-horarios', [EstudianteInscripcionController::class, 'verificarHorarios']);
         Route::get('/', [EstudianteInscripcionController::class, 'listar']);
         Route::post('/', [EstudianteInscripcionController::class, 'crear']);

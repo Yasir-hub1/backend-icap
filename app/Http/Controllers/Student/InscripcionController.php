@@ -12,14 +12,133 @@ use App\Models\Cuota;
 use App\Models\Bitacora;
 use App\Models\Descuento;
 use App\Models\Horario;
+use App\Models\Notificacion;
+use App\Models\ProgramaModulo;
 use App\Traits\EnviaNotificaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class InscripcionController extends Controller
 {
     use EnviaNotificaciones;
+    /**
+     * Obtener descuentos disponibles para el estudiante
+     */
+    public function descuentosDisponibles(Request $request)
+    {
+        try {
+            $authUser = $request->auth_user;
+            $estudiante = $authUser instanceof Estudiante ? $authUser : Estudiante::findOrFail($authUser->id);
+
+            // Descuentos vigentes (sin inscripción asociada)
+            $descuentosVigentes = Descuento::whereNull('inscripcion_id')
+                ->where('descuento', '>', 0)
+                ->get()
+                ->map(function ($descuento) {
+                    return [
+                        'id' => $descuento->id,
+                        'nombre' => $descuento->nombre,
+                        'porcentaje' => $descuento->descuento,
+                        'tipo' => 'vigente'
+                    ];
+                });
+
+            // Descuentos por convenio (si el estudiante tiene convenio activo)
+            // TODO: Implementar lógica de convenios cuando esté disponible
+            $descuentosConvenio = collect([]);
+
+            // Descuentos promocionales (pueden agregarse más adelante)
+            $descuentosPromocionales = collect([]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Descuentos disponibles obtenidos exitosamente',
+                'data' => [
+                    'vigentes' => $descuentosVigentes,
+                    'convenio' => $descuentosConvenio,
+                    'promocionales' => $descuentosPromocionales,
+                    'total' => $descuentosVigentes->count() + $descuentosConvenio->count() + $descuentosPromocionales->count()
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener descuentos disponibles',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener reglas de cuotas para un programa
+     */
+    public function reglasCuotas(Request $request, $programaId)
+    {
+        try {
+            $programa = Programa::with('institucion')->findOrFail($programaId);
+
+            // Reglas por defecto (pueden configurarse por programa o institución)
+            $minCuotas = 1;
+            $maxCuotas = 12;
+            $permiteContado = true;
+            $promocionSinInteres = false;
+            $cuotasSinInteres = 0;
+
+            // Aquí se pueden agregar reglas específicas por programa o institución
+            // Por ejemplo:
+            // if ($programa->institucion && $programa->institucion->reglas_cuotas) {
+            //     $reglas = array_merge($reglas, $programa->institucion->reglas_cuotas);
+            // }
+
+            // Generar opciones de cuotas válidas según reglas
+            $opcionesCuotas = [];
+
+            // Opción de pago al contado (1 cuota)
+            if ($permiteContado) {
+                $opcionesCuotas[] = [
+                    'valor' => 1,
+                    'label' => '1 cuota (Pago al contado)',
+                    'sin_interes' => true
+                ];
+            }
+
+            // Generar opciones desde min hasta max
+            for ($i = max(2, $minCuotas); $i <= $maxCuotas; $i++) {
+                $opcionesCuotas[] = [
+                    'valor' => $i,
+                    'label' => "{$i} cuotas" . ($promocionSinInteres && $i <= $cuotasSinInteres ? ' (Sin interés)' : ''),
+                    'sin_interes' => $promocionSinInteres && $i <= $cuotasSinInteres
+                ];
+            }
+
+            $reglas = [
+                'min_cuotas' => $minCuotas,
+                'max_cuotas' => $maxCuotas,
+                'permite_contado' => $permiteContado,
+                'promocion_sin_interes' => $promocionSinInteres,
+                'cuotas_sin_interes' => $cuotasSinInteres,
+                'opciones_cuotas' => $opcionesCuotas,
+                'descripcion' => "Puedes elegir entre {$minCuotas} y {$maxCuotas} cuotas para tu programa"
+            ];
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Reglas de cuotas obtenidas exitosamente',
+                'data' => $reglas
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener reglas de cuotas',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     /**
      * Listar programas activos disponibles para inscripción
      */
@@ -214,6 +333,7 @@ class InscripcionController extends Controller
             'programa_id' => 'required|exists:programa,id',
             'grupo_id' => 'required|exists:grupo,grupo_id',
             'numero_cuotas' => 'required|integer|min:1|max:12'
+            // descuento_id NO se recibe del frontend, se calcula automáticamente
         ]);
 
         DB::beginTransaction();
@@ -320,45 +440,63 @@ class InscripcionController extends Controller
                 ], 400);
             }
 
-            // Calcular monto total
-            $costoBase = $programa->costo ?? 0;
-            $montoTotal = $costoBase;
+            // Obtener reglas de cuotas para validar
+            $reglas = [
+                'min_cuotas' => 1,
+                'max_cuotas' => 12
+            ];
 
-            // Aplicar descuento si existe
-            $descuento = null;
-            if ($request->descuento_id) {
-                $descuento = Descuento::find($request->descuento_id);
-                if ($descuento && $descuento->descuento > 0) {
-                    $montoDescuento = $costoBase * ($descuento->descuento / 100);
-                    $montoTotal -= $montoDescuento;
-                }
+            // Aquí se pueden obtener reglas específicas del programa/institución
+            // Por ahora usamos valores por defecto
+
+            // Validar número de cuotas según reglas
+            $numeroCuotas = $request->numero_cuotas;
+            if ($numeroCuotas < $reglas['min_cuotas'] || $numeroCuotas > $reglas['max_cuotas']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "El número de cuotas debe estar entre {$reglas['min_cuotas']} y {$reglas['max_cuotas']}",
+                    'min_cuotas' => $reglas['min_cuotas'],
+                    'max_cuotas' => $reglas['max_cuotas']
+                ], 400);
             }
 
-            $montoTotal = max(0, $montoTotal);
+            // PASO 3.1 - Cargar datos del programa
+            $costoBase = $programa->costo ?? 0;
 
-            // Crear registro de inscripción
+            // PASO 3.2 - Buscar descuentos vigentes del programa
+            $descuentoVigente = $programa->obtenerMejorDescuentoVigente();
+
+            // PASO 3.3 - Escoger automáticamente el mejor descuento (ya viene ordenado por mayor porcentaje)
+            $descuento = $descuentoVigente;
+
+            // PASO 3.4 - Calcular costo_final
+            $costoFinal = $costoBase;
+            if ($descuento && $descuento->descuento > 0) {
+                $montoDescuento = $costoBase * ($descuento->descuento / 100);
+                $costoFinal = $costoBase - $montoDescuento;
+            }
+
+            $costoFinal = max(0, $costoFinal);
+
+            // PASO 3.5 - Guardar la inscripción (sin grupo_id, la relación se maneja en grupo_estudiante)
             $inscripcion = Inscripcion::create([
                 'fecha' => now()->toDateString(),
                 'estudiante_id' => $estudiante->id,
-                'programa_id' => $programa->id
+                'programa_id' => $programa->id,
+                'descuento_id' => $descuento ? $descuento->id : null,
+                'costo_base' => $costoBase,
+                'costo_final' => $costoFinal
             ]);
 
-            // Generar Plan de Pagos
-            $numeroCuotas = $request->numero_cuotas;
+            // Generar Plan de Pagos con costo_final
             $planPagos = PlanPagos::create([
                 'inscripcion_id' => $inscripcion->id,
-                'monto_total' => $montoTotal,
+                'monto_total' => $costoFinal,
                 'total_cuotas' => $numeroCuotas
             ]);
 
-            // Asociar descuento si existe
-            if ($descuento) {
-                $descuento->inscripcion_id = $inscripcion->id;
-                $descuento->save();
-            }
-
             // Generar Cuotas mensuales
-            $montoCuota = $montoTotal / $numeroCuotas;
+            $montoCuota = $costoFinal / $numeroCuotas;
             $cuotas = [];
             for ($i = 0; $i < $numeroCuotas; $i++) {
                 $fechaIni = now()->addMonths($i)->startOfMonth();
@@ -379,9 +517,8 @@ class InscripcionController extends Controller
                 'estado' => 'ACTIVO'
             ]);
 
-            // Cambiar estado_id del estudiante a 5 (Inscrito)
-            $estudiante->estado_id = 5;
-            $estudiante->save();
+            // El estudiante mantiene su estado_id = 4 (Validado - Activo)
+            // No se cambia el estado al inscribirse
 
             // Registrar en bitácora
             $usuario = $estudiante->usuario;
@@ -390,14 +527,14 @@ class InscripcionController extends Controller
                     'fecha' => now()->toDateString(),
                     'tabla' => 'Inscripcion',
                     'codTabla' => $inscripcion->id,
-                    'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) se inscribió en el programa '{$programa->nombre}'. Monto total: {$montoTotal} BOB, Cuotas: {$numeroCuotas}",
+                    'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) se inscribió en el programa '{$programa->nombre}'. Costo base: {$costoBase} BOB, Costo final: {$costoFinal} BOB" . ($descuento ? " (Descuento aplicado: {$descuento->descuento}%)" : "") . ", Cuotas: {$numeroCuotas}",
                     'usuario_id' => $usuario->usuario_id
                 ]);
             }
 
             // Enviar notificaciones
             $this->notificarNuevaInscripcion($estudiante, $programa->nombre, $inscripcion->id);
-            $this->notificarPlanPagoCreado($estudiante, $montoTotal, $numeroCuotas, $planPagos->id);
+            $this->notificarPlanPagoCreado($estudiante, $costoFinal, $numeroCuotas, $planPagos->id);
 
             DB::commit();
 
@@ -411,7 +548,10 @@ class InscripcionController extends Controller
                     'grupo' => $grupo->load(['modulo', 'docente', 'horarios']),
                     'resumen' => [
                         'costo_base' => $costoBase,
-                        'monto_total' => $montoTotal,
+                        'descuento_aplicado' => $descuento ? ($costoBase * ($descuento->descuento / 100)) : 0,
+                        'descuento_porcentaje' => $descuento ? $descuento->descuento : null,
+                        'descuento_nombre' => $descuento ? $descuento->nombre : null,
+                        'costo_final' => $costoFinal,
                         'total_cuotas' => $numeroCuotas,
                         'estado_estudiante' => $estudiante->estado_id
                     ]
@@ -611,6 +751,297 @@ class InscripcionController extends Controller
                 'message' => 'Error al obtener detalle de inscripción',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Obtener información completa del grupo para el estudiante (Paso 19)
+     */
+    public function obtenerGrupo(Request $request, $grupoId)
+    {
+        try {
+            $authUser = $request->auth_user;
+            $estudiante = $authUser instanceof Estudiante ? $authUser : Estudiante::findOrFail($authUser->id);
+
+            $grupo = Grupo::with([
+                'programa',
+                'modulo',
+                'docente',
+                'horarios' => function($query) {
+                    $query->withPivot('aula');
+                },
+                'estudiantes' => function($query) use ($estudiante) {
+                    $query->where('estudiante_id', $estudiante->id);
+                }
+            ])
+            ->whereHas('estudiantes', function ($query) use ($estudiante) {
+                $query->where('estudiante_id', $estudiante->id);
+            })
+            ->findOrFail($grupoId);
+
+            // Obtener información del estudiante en el grupo
+            $estudianteEnGrupo = $grupo->estudiantes->first();
+            $nota = $estudianteEnGrupo ? $estudianteEnGrupo->pivot->nota : null;
+            $estadoAcademico = $estudianteEnGrupo ? $estudianteEnGrupo->pivot->estado : null;
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Información del grupo obtenida exitosamente',
+                'data' => [
+                    'grupo' => [
+                        'id' => $grupo->grupo_id,
+                        'programa' => $grupo->programa ? [
+                            'id' => $grupo->programa->id,
+                            'nombre' => $grupo->programa->nombre,
+                            'duracion_meses' => $grupo->programa->duracion_meses,
+                            'costo' => $grupo->programa->costo
+                        ] : null,
+                        'modulo' => $grupo->modulo ? [
+                            'id' => $grupo->modulo->modulo_id,
+                            'nombre' => $grupo->modulo->nombre
+                        ] : null,
+                        'docente' => $grupo->docente ? [
+                            'id' => $grupo->docente->id,
+                            'nombre' => $grupo->docente->nombre,
+                            'apellido' => $grupo->docente->apellido,
+                            'nombre_completo' => "{$grupo->docente->nombre} {$grupo->docente->apellido}",
+                            'cargo' => $grupo->docente->cargo,
+                            'area_especializacion' => $grupo->docente->area_de_especializacion
+                        ] : null,
+                        'fecha_ini' => $grupo->fecha_ini,
+                        'fecha_fin' => $grupo->fecha_fin,
+                        'horarios' => $grupo->horarios->map(function ($horario) {
+                            return [
+                                'horario_id' => $horario->horario_id,
+                                'dias' => $horario->dias,
+                                'hora_ini' => $horario->hora_ini ? Carbon::parse($horario->hora_ini)->format('H:i') : null,
+                                'hora_fin' => $horario->hora_fin ? Carbon::parse($horario->hora_fin)->format('H:i') : null,
+                                'aula' => $horario->pivot->aula ?? null
+                            ];
+                        }),
+                        'materiales' => [], // TODO: Implementar cuando exista tabla de materiales
+                        'actividades' => [] // TODO: Implementar cuando exista tabla de actividades
+                    ],
+                    'estudiante' => [
+                        'nota' => $nota,
+                        'estado_academico' => $estadoAcademico,
+                        'aprobado' => $nota !== null && $nota >= 51
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener información del grupo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Verificar y procesar cierre de módulo (Paso 21)
+     * Se ejecuta cuando el docente marca el módulo como cerrado
+     */
+    public function verificarCierreModulo($grupoId)
+    {
+        try {
+            $grupo = Grupo::with(['programa', 'modulo', 'estudiantes'])->findOrFail($grupoId);
+            $programa = $grupo->programa;
+
+            if (!$programa) {
+                return;
+            }
+
+            // Obtener todos los módulos del programa ordenados
+            $modulosPrograma = ProgramaModulo::where('programa_id', $programa->id)
+                ->orderBy('edicion', 'asc')
+                ->with('modulo')
+                ->get();
+
+            // Para cada estudiante en el grupo
+            foreach ($grupo->estudiantes as $estudiante) {
+                $nota = $estudiante->pivot->nota;
+                $estado = $estudiante->pivot->estado;
+
+                // Si el estudiante aprobó el módulo (nota >= 51 y estado = APROBADO)
+                if ($nota !== null && $nota >= 51 && $estado === 'APROBADO') {
+                    // Buscar el siguiente módulo del programa
+                    $moduloActual = $grupo->modulo;
+                    $moduloActualIndex = $modulosPrograma->search(function ($pm) use ($moduloActual) {
+                        return $pm->modulo_id === $moduloActual->modulo_id;
+                    });
+
+                    if ($moduloActualIndex !== false && $moduloActualIndex < $modulosPrograma->count() - 1) {
+                        // Hay siguiente módulo
+                        $siguienteModulo = $modulosPrograma[$moduloActualIndex + 1];
+
+                        // Buscar si existe un grupo del siguiente módulo para este programa
+                        $siguienteGrupo = Grupo::where('programa_id', $programa->id)
+                            ->where('modulo_id', $siguienteModulo->modulo_id)
+                            ->where('fecha_fin', '>=', now())
+                            ->first();
+
+                        if ($siguienteGrupo) {
+                            // Verificar si el estudiante ya está inscrito en el siguiente grupo
+                            $yaInscrito = $siguienteGrupo->estudiantes()
+                                ->where('estudiante_id', $estudiante->id)
+                                ->exists();
+
+                            if (!$yaInscrito) {
+                                // Inscribir automáticamente al siguiente grupo
+                                $siguienteGrupo->estudiantes()->attach($estudiante->id, [
+                                    'nota' => null,
+                                    'estado' => 'EN_CURSO'
+                                ]);
+
+                                // Enviar notificación al estudiante
+                                $this->notificarProgresoModulo(
+                                    $estudiante,
+                                    $moduloActual->nombre,
+                                    $siguienteModulo->modulo->nombre,
+                                    $programa->nombre
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Error en verificarCierreModulo: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Verificar y procesar finalización de programa (Paso 22)
+     */
+    public function verificarFinalizacionPrograma($estudianteId, $programaId)
+    {
+        try {
+            $estudiante = Estudiante::findOrFail($estudianteId);
+            $programa = Programa::with('modulos')->findOrFail($programaId);
+
+            // Obtener todos los módulos del programa
+            $modulosPrograma = ProgramaModulo::where('programa_id', $programa->id)
+                ->orderBy('edicion', 'asc')
+                ->with('modulo')
+                ->get();
+
+            // Obtener todos los grupos del estudiante para este programa
+            $gruposEstudiante = Grupo::where('programa_id', $programa->id)
+                ->whereHas('estudiantes', function ($query) use ($estudianteId) {
+                    $query->where('estudiante_id', $estudianteId);
+                })
+                ->with(['estudiantes' => function ($query) use ($estudianteId) {
+                    $query->where('estudiante_id', $estudianteId);
+                }])
+                ->get();
+
+            // Verificar si todos los módulos están aprobados
+            $todosAprobados = true;
+            $modulosAprobados = 0;
+            $totalModulos = $modulosPrograma->count();
+
+            foreach ($modulosPrograma as $programaModulo) {
+                $grupoModulo = $gruposEstudiante->first(function ($grupo) use ($programaModulo) {
+                    return $grupo->modulo_id === $programaModulo->modulo_id;
+                });
+
+                if ($grupoModulo) {
+                    $estudianteEnGrupo = $grupoModulo->estudiantes->first();
+                    if ($estudianteEnGrupo) {
+                        $nota = $estudianteEnGrupo->pivot->nota;
+                        $estado = $estudianteEnGrupo->pivot->estado;
+
+                        if ($nota !== null && $nota >= 51 && $estado === 'APROBADO') {
+                            $modulosAprobados++;
+                        } else {
+                            $todosAprobados = false;
+                        }
+                    } else {
+                        $todosAprobados = false;
+                    }
+                } else {
+                    $todosAprobados = false;
+                }
+            }
+
+            // Si todos los módulos están aprobados
+            if ($todosAprobados && $modulosAprobados === $totalModulos) {
+                // Marcar programa como completado
+                // TODO: Crear tabla de progreso_programa o agregar campo a inscripcion
+                // Por ahora, solo enviamos notificación
+                $this->notificarFinalizacionPrograma($estudiante, $programa->nombre);
+
+                // Registrar en bitácora
+                $usuario = $estudiante->usuario;
+                if ($usuario) {
+                    Bitacora::create([
+                        'fecha' => now()->toDateString(),
+                        'tabla' => 'Inscripcion',
+                        'codTabla' => $programa->id,
+                        'transaccion' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) completó exitosamente el programa '{$programa->nombre}'. Todos los módulos aprobados.",
+                        'usuario_id' => $usuario->usuario_id
+                    ]);
+                }
+            }
+
+            return [
+                'completado' => $todosAprobados,
+                'modulos_aprobados' => $modulosAprobados,
+                'total_modulos' => $totalModulos
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('Error en verificarFinalizacionPrograma: ' . $e->getMessage());
+            return [
+                'completado' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Notificar progreso de módulo
+     */
+    private function notificarProgresoModulo($estudiante, $moduloActual, $moduloSiguiente, $programa)
+    {
+        $usuario = $estudiante->usuario;
+        if ($usuario) {
+            Notificacion::crearNotificacion(
+                $usuario->usuario_id,
+                'ESTUDIANTE',
+                'Progreso Académico',
+                "Has aprobado el módulo '{$moduloActual}' y has sido inscrito automáticamente en el siguiente módulo '{$moduloSiguiente}' del programa '{$programa}'.",
+                'academico',
+                [
+                    'modulo_actual' => $moduloActual,
+                    'modulo_siguiente' => $moduloSiguiente,
+                    'programa' => $programa
+                ]
+            );
+        }
+    }
+
+    /**
+     * Notificar finalización de programa
+     */
+    private function notificarFinalizacionPrograma($estudiante, $programaNombre)
+    {
+        $usuario = $estudiante->usuario;
+        if ($usuario) {
+            Notificacion::crearNotificacion(
+                $usuario->usuario_id,
+                'ESTUDIANTE',
+                'Programa Completado',
+                "¡Felicidades! Has completado exitosamente el programa '{$programaNombre}'. Todos los módulos han sido aprobados. Puedes solicitar tu certificado.",
+                'academico',
+                [
+                    'programa' => $programaNombre,
+                    'completado' => true
+                ]
+            );
         }
     }
 }

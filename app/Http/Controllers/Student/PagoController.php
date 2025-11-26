@@ -55,6 +55,7 @@ class PagoController extends Controller
 
             // Transformar datos para mostrar planes completos
             $planesData = $inscripciones->map(function ($inscripcion) {
+                $descuento = $inscripcion->descuento;
                 $plan = $inscripcion->planPago;
                 if (!$plan) {
                     return null;
@@ -68,8 +69,20 @@ class PagoController extends Controller
 
                 return [
                     'inscripcion_id' => $inscripcion->id,
-                    'programa' => $inscripcion->programa ? $inscripcion->programa->nombre : '',
+                    'programa' => [
+                        'id' => $inscripcion->programa->id ?? null,
+                        'nombre' => $inscripcion->programa ? $inscripcion->programa->nombre : '',
+                    ],
                     'plan_id' => $plan->id,
+                    'costo_base' => $inscripcion->costo_base,
+                    'costo_final' => $inscripcion->costo_final,
+                    'descuento' => $descuento ? [
+                        'id' => $descuento->id,
+                        'nombre' => $descuento->nombre,
+                        'descuento' => $descuento->descuento,
+                        'fecha_inicio' => $descuento->fecha_inicio,
+                        'fecha_fin' => $descuento->fecha_fin,
+                    ] : null,
                     'monto_total' => $plan->monto_total,
                     'monto_pagado' => $plan->monto_pagado,
                     'monto_pendiente' => $plan->monto_pendiente,
@@ -99,19 +112,36 @@ class PagoController extends Controller
                                 ];
                             })
                         ];
-                    })
+                    })->toArray()
                 ];
             })->filter()->values();
 
             // Aplanar cuotas para compatibilidad con el frontend existente
             $cuotas = $planesData->flatMap(function ($plan) {
-                return $plan['cuotas']->map(function ($cuota) use ($plan) {
-                    return [
-                        ...$cuota,
-                        'programa' => $plan['programa'],
+                $cuotasPlan = $plan['cuotas'] ?? [];
+                // Si es una colección, convertir a array
+                if (is_object($cuotasPlan) && method_exists($cuotasPlan, 'toArray')) {
+                    $cuotasPlan = $cuotasPlan->toArray();
+                } elseif (!is_array($cuotasPlan)) {
+                    $cuotasPlan = [];
+                }
+                
+                return collect($cuotasPlan)->map(function ($cuota) use ($plan) {
+                    // Obtener nombre del programa de forma segura
+                    $programaNombre = '';
+                    if (isset($plan['programa'])) {
+                        if (is_array($plan['programa']) && isset($plan['programa']['nombre'])) {
+                            $programaNombre = $plan['programa']['nombre'];
+                        } elseif (is_string($plan['programa'])) {
+                            $programaNombre = $plan['programa'];
+                        }
+                    }
+                    
+                    return array_merge($cuota, [
+                        'programa' => $programaNombre,
                         'plan_id' => $plan['plan_id'],
                         'inscripcion_id' => $plan['inscripcion_id']
-                    ];
+                    ]);
                 });
             });
 
