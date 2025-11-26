@@ -8,6 +8,7 @@ use App\Models\Programa;
 use App\Models\Modulo;
 use App\Models\Docente;
 use App\Models\Horario;
+use App\Models\ProgramaModulo;
 use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -67,16 +68,16 @@ class GrupoController extends Controller
             // Ordenamiento
             $sortBy = $request->get('sort_by', 'fecha_ini');
             $sortDirection = $request->get('sort_direction', 'desc');
-            
+
             // Validar que sort_by sea una columna válida
             $allowedSortColumns = ['fecha_ini', 'fecha_fin', 'grupo_id', 'id', 'created_at'];
             if (!in_array($sortBy, $allowedSortColumns)) {
                 $sortBy = 'fecha_ini';
             }
-            
+
             // Validar dirección de ordenamiento
             $sortDirection = strtolower($sortDirection) === 'asc' ? 'asc' : 'desc';
-            
+
             $grupos = $query->orderBy($sortBy, $sortDirection)
                            ->paginate($perPage);
 
@@ -155,11 +156,21 @@ class GrupoController extends Controller
      */
     public function crear(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
+            $validator = Validator::make($request->all(), [
             'fecha_ini' => 'required|date',
             'fecha_fin' => 'required|date|after:fecha_ini',
             'programa_id' => 'required|integer|exists:programa,id',
-            'modulo_id' => 'required|integer|exists:modulo,modulo_id',
+            'modulo_id' => [
+                'required',
+                'integer',
+                'exists:modulo,modulo_id',
+                function ($attribute, $value, $fail) use ($request) {
+                    $programaId = $request->input('programa_id');
+                    if ($programaId && !$this->validarModuloEnPrograma($programaId, $value)) {
+                        $fail('El módulo seleccionado no pertenece al programa elegido.');
+                    }
+                }
+            ],
             'docente_id' => 'required|integer|exists:docente,id',
             'horarios' => 'nullable|array',
             'horarios.*.horario_id' => 'required|integer|exists:horario,horario_id',
@@ -268,7 +279,18 @@ class GrupoController extends Controller
                 'fecha_ini' => 'sometimes|required|date',
                 'fecha_fin' => 'sometimes|required|date|after:fecha_ini',
                 'programa_id' => 'sometimes|required|integer|exists:programa,id',
-                'modulo_id' => 'sometimes|required|integer|exists:modulo,modulo_id',
+                'modulo_id' => [
+                    'sometimes',
+                    'required',
+                    'integer',
+                    'exists:modulo,modulo_id',
+                    function ($attribute, $value, $fail) use ($request, $grupo) {
+                        $programaId = $request->input('programa_id', $grupo->programa_id);
+                        if ($programaId && $value && !$this->validarModuloEnPrograma($programaId, $value)) {
+                            $fail('El módulo seleccionado no pertenece al programa elegido.');
+                        }
+                    }
+                ],
                 'docente_id' => 'sometimes|required|integer|exists:docente,id',
                 'horarios' => 'nullable|array',
                 'horarios.*.horario_id' => 'required|integer|exists:horario,horario_id',
@@ -435,19 +457,8 @@ class GrupoController extends Controller
 
             $datos = [
                 'programas' => $programas,
-                'modulos' => Modulo::select('modulo_id', 'nombre', 'credito', 'horas_academicas')
-                    ->orderBy('nombre')
-                    ->get()
-                    ->map(function($modulo) {
-                        return [
-                            'id' => $modulo->modulo_id, // Usar modulo_id como id para el frontend
-                            'modulo_id' => $modulo->modulo_id,
-                            'nombre' => $modulo->nombre,
-                            'credito' => $modulo->credito,
-                            'horas_academicas' => $modulo->horas_academicas
-                        ];
-                    })
-                    ->values(), // Asegurar que sea un array indexado
+                // No devolver todos los módulos aquí, se obtendrán por programa
+                'modulos' => [],
                 'docentes' => Docente::select('id', 'registro_docente', 'nombre', 'apellido', 'ci')
                     ->orderBy('apellido')
                     ->orderBy('nombre')
@@ -529,5 +540,78 @@ class GrupoController extends Controller
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
+    }
+
+    /**
+     * Obtener módulos por programa
+     */
+    public function modulosPorPrograma(Request $request, $programaId): JsonResponse
+    {
+        try {
+            $programaId = (int) $programaId;
+
+            if ($programaId <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ID de programa inválido'
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Verificar que el programa existe
+            $programa = Programa::find($programaId);
+            if (!$programa) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Programa no encontrado'
+                ], 404)->header('Access-Control-Allow-Origin', '*')
+                        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Obtener módulos del programa a través de la relación
+            $modulos = $programa->modulos()
+                ->select('modulo.modulo_id', 'modulo.nombre', 'modulo.credito', 'modulo.horas_academicas', 'programa_modulo.edicion', 'programa_modulo.estado')
+                ->orderBy('modulo.nombre')
+                ->get()
+                ->map(function($modulo) {
+                    return [
+                        'id' => $modulo->modulo_id,
+                        'modulo_id' => $modulo->modulo_id,
+                        'nombre' => $modulo->nombre,
+                        'credito' => $modulo->credito,
+                        'horas_academicas' => $modulo->horas_academicas,
+                        'edicion' => $modulo->pivot->edicion ?? null,
+                        'estado' => $modulo->pivot->estado ?? null
+                    ];
+                })
+                ->values();
+
+            return response()->json([
+                'success' => true,
+                'data' => $modulos,
+                'message' => 'Módulos obtenidos exitosamente'
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener módulos: ' . (config('app.debug') ? $e->getMessage() : 'Error interno del servidor')
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        }
+    }
+
+    /**
+     * Validar que un módulo pertenece a un programa
+     */
+    private function validarModuloEnPrograma(int $programaId, int $moduloId): bool
+    {
+        return ProgramaModulo::where('programa_id', $programaId)
+            ->where('modulo_id', $moduloId)
+            ->exists();
     }
 }

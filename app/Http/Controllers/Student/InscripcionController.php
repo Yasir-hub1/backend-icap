@@ -449,6 +449,7 @@ class InscripcionController extends Controller
             $inscripciones = Inscripcion::with([
                 'programa.ramaAcademica',
                 'programa.tipoPrograma',
+                'programa.institucion',
                 'descuento',
                 'planPago.cuotas.pagos'
             ])
@@ -456,8 +457,16 @@ class InscripcionController extends Controller
             ->orderBy('fecha', 'desc')
             ->paginate($perPage);
 
-            // Enriquecer con información de estado de pagos
-            $inscripciones->getCollection()->transform(function ($inscripcion) {
+            // Obtener grupos del estudiante agrupados por programa
+            $gruposEstudiante = $estudiante->grupos()
+                ->with(['modulo', 'docente', 'horarios' => function($query) {
+                    $query->withPivot('aula');
+                }])
+                ->get()
+                ->groupBy('programa_id');
+
+            // Enriquecer con información de estado de pagos y grupos
+            $inscripciones->getCollection()->transform(function ($inscripcion) use ($gruposEstudiante) {
                 $planPago = $inscripcion->planPago;
 
                 if ($planPago) {
@@ -475,6 +484,40 @@ class InscripcionController extends Controller
                         'monto_pagado' => $planPago->monto_pagado ?? 0,
                         'monto_pendiente' => $planPago->monto_pendiente ?? $planPago->monto_total
                     ];
+                }
+
+                // Agregar grupos del estudiante para este programa
+                $programaId = $inscripcion->programa_id;
+                if ($gruposEstudiante->has($programaId)) {
+                    $gruposPrograma = $gruposEstudiante->get($programaId);
+                    // Tomar el primer grupo (o el más reciente)
+                    $grupo = $gruposPrograma->first();
+                    if ($grupo) {
+                        $inscripcion->grupo = [
+                            'id' => $grupo->grupo_id,
+                            'modulo' => $grupo->modulo ? [
+                                'id' => $grupo->modulo->modulo_id,
+                                'nombre' => $grupo->modulo->nombre
+                            ] : null,
+                            'docente' => $grupo->docente ? [
+                                'id' => $grupo->docente->id,
+                                'nombre' => $grupo->docente->nombre,
+                                'apellido' => $grupo->docente->apellido,
+                                'nombre_completo' => "{$grupo->docente->nombre} {$grupo->docente->apellido}"
+                            ] : null,
+                            'fecha_ini' => $grupo->fecha_ini,
+                            'fecha_fin' => $grupo->fecha_fin,
+                            'horarios' => $grupo->horarios->map(function ($horario) {
+                                return [
+                                    'horario_id' => $horario->horario_id,
+                                    'dias' => $horario->dias,
+                                    'hora_ini' => $horario->hora_ini ? \Carbon\Carbon::parse($horario->hora_ini)->format('H:i') : null,
+                                    'hora_fin' => $horario->hora_fin ? \Carbon\Carbon::parse($horario->hora_fin)->format('H:i') : null,
+                                    'aula' => $horario->pivot->aula ?? null
+                                ];
+                            })
+                        ];
+                    }
                 }
 
                 return $inscripcion;

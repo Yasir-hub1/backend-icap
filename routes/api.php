@@ -421,6 +421,7 @@ Route::middleware(['auth:api', 'role:ADMIN'])->prefix('admin')->group(function (
         Route::post('/', [\App\Http\Controllers\Admin\GrupoController::class, 'crear'])->middleware('permission:grupos_crear');
         // IMPORTANTE: Rutas específicas ANTES de rutas con parámetros dinámicos
         Route::get('/datos-formulario', [\App\Http\Controllers\Admin\GrupoController::class, 'datosFormulario'])->middleware('permission:grupos_ver');
+        Route::get('/modulos-por-programa/{programaId}', [\App\Http\Controllers\Admin\GrupoController::class, 'modulosPorPrograma'])->where('programaId', '[0-9]+')->middleware('permission:grupos_ver');
         // Rutas con parámetros dinámicos al final
         Route::get('/{id}', [\App\Http\Controllers\Admin\GrupoController::class, 'obtener'])->where('id', '[0-9]+')->middleware('permission:grupos_ver');
         Route::put('/{id}', [\App\Http\Controllers\Admin\GrupoController::class, 'actualizar'])->where('id', '[0-9]+')->middleware('permission:grupos_editar');
