@@ -8,6 +8,7 @@ use App\Models\Pago;
 use App\Models\Bitacora;
 use App\Models\Inscripcion;
 use App\Models\Estudiante;
+use App\Services\PaymentGatewayService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -69,6 +70,7 @@ class PagoController extends Controller
 
                 return [
                     'inscripcion_id' => $inscripcion->id,
+                    'fecha_inscripcion' => $inscripcion->fecha,
                     'programa' => [
                         'id' => $inscripcion->programa->id ?? null,
                         'nombre' => $inscripcion->programa ? $inscripcion->programa->nombre : '',
@@ -91,12 +93,13 @@ class PagoController extends Controller
                     'cuotas_pagadas' => $cuotasPagadas,
                     'cuotas_pendientes' => $totalCuotas - $cuotasPagadas,
                     'porcentaje_pagado' => $plan->monto_total > 0 ? ($plan->monto_pagado / $plan->monto_total) * 100 : 0,
-                    'cuotas' => $cuotas->map(function ($cuota) {
+                    'cuotas' => $cuotas->map(function ($cuota) use ($inscripcion) {
                         return [
                             'id' => $cuota->id,
                             'monto' => $cuota->monto,
                             'fecha_ini' => $cuota->fecha_ini,
                             'fecha_fin' => $cuota->fecha_fin,
+                            'fecha_inscripcion' => $inscripcion->fecha, // Agregar fecha de inscripción
                             'estado' => $cuota->monto_pagado >= $cuota->monto ? 'PAGADA' : ($cuota->esta_vencida ? 'VENCIDA' : 'PENDIENTE'),
                             'esta_pagada' => $cuota->monto_pagado >= $cuota->monto,
                             'esta_vencida' => $cuota->esta_vencida,
@@ -125,7 +128,7 @@ class PagoController extends Controller
                 } elseif (!is_array($cuotasPlan)) {
                     $cuotasPlan = [];
                 }
-                
+
                 return collect($cuotasPlan)->map(function ($cuota) use ($plan) {
                     // Obtener nombre del programa de forma segura
                     $programaNombre = '';
@@ -136,7 +139,7 @@ class PagoController extends Controller
                             $programaNombre = $plan['programa'];
                         }
                     }
-                    
+
                     return array_merge($cuota, [
                         'programa' => $programaNombre,
                         'plan_id' => $plan['plan_id'],
@@ -249,7 +252,7 @@ class PagoController extends Controller
     }
 
     /**
-     * Registrar pago con comprobante
+     * Registrar pago con comprobante o generar QR
      */
     public function store(Request $request)
     {
@@ -257,7 +260,7 @@ class PagoController extends Controller
             'cuota_id' => 'required|exists:cuotas,id',
             'monto' => 'required|numeric|min:0.01',
             'metodo' => 'required|in:QR,TRANSFERENCIA,EFECTIVO',
-            'comprobante' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120', // 5MB max
+            'comprobante' => 'required_if:metodo,TRANSFERENCIA,EFECTIVO|file|mimes:pdf,jpg,jpeg,png|max:5120',
             'token' => 'nullable|string|max:255'
         ]);
 
@@ -299,7 +302,48 @@ class PagoController extends Controller
                 ], 422);
             }
 
-            // Guardar comprobante de pago
+            // Si el método es QR, usar pasarela de pagos
+            if ($request->metodo === 'QR') {
+                $paymentGatewayService = app(PaymentGatewayService::class);
+                $result = $paymentGatewayService->processQRPayment($cuota, $estudianteObj);
+
+                $pago = $result['pago'];
+
+                // Registrar en bitácora
+                $usuario = $estudianteObj->usuario;
+                if ($usuario) {
+                    Bitacora::create([
+                        'fecha' => now()->toDateString(),
+                        'tabla' => 'Pagos',
+                        'codTabla' => $pago->id,
+                        'transaccion' => "Estudiante {$estudianteObj->nombre} {$estudianteObj->apellido} (CI: {$estudianteObj->ci}) generó QR de pago de {$pago->monto} Bs. Nro Pago: {$pago->nro_pago}",
+                        'usuario_id' => $usuario->usuario_id
+                    ]);
+                }
+
+                DB::commit();
+
+                // Construir URL completa del QR si es una ruta relativa
+                $qrImageUrl = $result['qr_image'];
+                if ($qrImageUrl && !filter_var($qrImageUrl, FILTER_VALIDATE_URL)) {
+                    // Es una ruta relativa, construir URL completa
+                    $qrImageUrl = asset($qrImageUrl);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'QR generado exitosamente. Escanea el código para realizar el pago.',
+                    'data' => [
+                        'pago' => $pago->load('cuota'),
+                        'qr_image' => $qrImageUrl,
+                        'qr_base64' => $result['qr_base64'],
+                        'nro_pago' => $pago->nro_pago,
+                        'qr_expires_at' => $pago->qr_expires_at
+                    ]
+                ], 201);
+            }
+
+            // Para otros métodos (TRANSFERENCIA, EFECTIVO), requerir comprobante
             $comprobantePath = null;
             if ($request->hasFile('comprobante')) {
                 $file = $request->file('comprobante');
@@ -399,6 +443,60 @@ class PagoController extends Controller
                 ], 400);
             }
 
+            // Verificar si ya existe un pago QR pendiente para esta cuota
+            $pagoQR = Pago::where('cuota_id', $cuota->id)
+                ->where('metodo', 'QR')
+                ->where('estado_pagofacil', 'pendiente')
+                ->where(function($q) {
+                    $q->whereNull('qr_expires_at')
+                      ->orWhere('qr_expires_at', '>', now());
+                })
+                ->first();
+
+            if ($pagoQR) {
+                // Intentar obtener qr_base64 desde payment_info o leer el archivo
+                $qrBase64 = null;
+                if ($pagoQR->payment_info) {
+                    $paymentInfo = json_decode($pagoQR->payment_info, true);
+                    if (isset($paymentInfo['values']['qrBase64'])) {
+                        $qrBase64 = $paymentInfo['values']['qrBase64'];
+                    } elseif (isset($paymentInfo['qrBase64'])) {
+                        $qrBase64 = $paymentInfo['qrBase64'];
+                    }
+                }
+
+                // Si no está en payment_info, intentar leer el archivo
+                if (!$qrBase64 && $pagoQR->qr_image) {
+                    $qrPath = str_replace('/storage/', '', $pagoQR->qr_image);
+                    if (Storage::disk('public')->exists($qrPath)) {
+                        $qrContent = Storage::disk('public')->get($qrPath);
+                        $qrBase64 = base64_encode($qrContent);
+                    }
+                }
+
+                // Construir URL completa del QR si es una ruta relativa
+                $qrImageUrl = $pagoQR->qr_image;
+                if ($qrImageUrl && !filter_var($qrImageUrl, FILTER_VALIDATE_URL)) {
+                    // Es una ruta relativa, construir URL completa
+                    $qrImageUrl = asset($qrImageUrl);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'pago_id' => $pagoQR->id,
+                        'monto' => $pagoQR->monto,
+                        'qr_image' => $qrImageUrl,
+                        'qr_base64' => $qrBase64,
+                        'nro_pago' => $pagoQR->nro_pago,
+                        'qr_expires_at' => $pagoQR->qr_expires_at,
+                        'concepto' => "Cuota " . ($cuota->planPago->inscripcion->programa->nombre ?? ''),
+                        'estudiante' => $estudianteObj->nombre . ' ' . $estudianteObj->apellido,
+                        'ci' => $estudianteObj->ci
+                    ]
+                ], 200);
+            }
+
             // Información para generar QR (ajustar según banco/pasarela)
             return response()->json([
                 'success' => true,
@@ -415,6 +513,122 @@ class PagoController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener información de QR',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Subir comprobante después del pago QR
+     */
+    public function subirComprobanteQR(Request $request, $pagoId)
+    {
+        $request->validate([
+            'comprobante' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120'
+        ]);
+
+        try {
+            $estudiante = $request->auth_user;
+            $registroEstudiante = $estudiante instanceof \App\Models\Estudiante
+                ? $estudiante->registro_estudiante
+                : $estudiante->id;
+
+            $estudianteObj = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudianteObj) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+
+            $pago = Pago::whereHas('cuota.planPago.inscripcion', function ($query) use ($estudianteObj) {
+                    $query->where('estudiante_id', $estudianteObj->id);
+                })
+                ->where('id', $pagoId)
+                ->where('metodo', 'QR')
+                ->firstOrFail();
+
+            if ($request->hasFile('comprobante')) {
+                $file = $request->file('comprobante');
+                $nombreArchivo = time() . '_' . $file->getClientOriginalName();
+                $comprobantePath = $file->storeAs(
+                    "comprobantes/estudiante_{$estudianteObj->registro_estudiante}/pago_{$pago->id}",
+                    $nombreArchivo,
+                    'public'
+                );
+
+                $pago->comprobante = $comprobantePath;
+                $pago->save();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Comprobante subido exitosamente',
+                    'data' => [
+                        'pago' => $pago->load('cuota'),
+                        'comprobante_url' => Storage::url($comprobantePath)
+                    ]
+                ], 200);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'No se proporcionó archivo de comprobante'
+            ], 400);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al subir comprobante',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Consultar estado de pago QR
+     */
+    public function consultarEstadoQR(Request $request, $pagoId)
+    {
+        try {
+            $estudiante = $request->auth_user;
+            $registroEstudiante = $estudiante instanceof \App\Models\Estudiante
+                ? $estudiante->registro_estudiante
+                : $estudiante->id;
+
+            $estudianteObj = Estudiante::where('registro_estudiante', $registroEstudiante)->first();
+            if (!$estudianteObj) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Estudiante no encontrado'
+                ], 404);
+            }
+
+            $pago = Pago::whereHas('cuota.planPago.inscripcion', function ($query) use ($estudianteObj) {
+                    $query->where('estudiante_id', $estudianteObj->id);
+                })
+                ->where('id', $pagoId)
+                ->where('metodo', 'QR')
+                ->firstOrFail();
+
+            $paymentGatewayService = app(PaymentGatewayService::class);
+            $result = $paymentGatewayService->consultPaymentStatus($pago);
+
+            $pago->refresh();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'pago' => $pago->load('cuota'),
+                    'paymentInfo' => $result['paymentInfo'] ?? null,
+                    'estado' => $pago->estado_pagofacil,
+                    'verificado' => $pago->verificado
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al consultar estado del pago',
                 'error' => $e->getMessage()
             ], 500);
         }

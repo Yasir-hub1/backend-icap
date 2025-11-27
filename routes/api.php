@@ -83,6 +83,19 @@ Route::prefix('auth')->group(function () {
 
 /*
 |--------------------------------------------------------------------------
+| RUTAS PÚBLICAS - PAGO FÁCIL CALLBACK
+|--------------------------------------------------------------------------
+| Estas rutas son llamadas por PagoFácil, no requieren autenticación
+*/
+use App\Http\Controllers\PaymentController;
+
+Route::prefix('payment')->group(function () {
+    Route::post('/callback', [PaymentController::class, 'callback']);
+    Route::get('/check-status/{id}', [PaymentController::class, 'checkStatus']);
+});
+
+/*
+|--------------------------------------------------------------------------
 | RUTAS PROTEGIDAS - PORTAL ESTUDIANTE
 |--------------------------------------------------------------------------
 | Requiere autenticación JWT y rol ESTUDIANTE
@@ -124,6 +137,8 @@ Route::middleware([\App\Http\Middleware\StudentAuthMiddleware::class])->prefix('
         Route::post('/', [EstudiantePagoController::class, 'crear']);
         Route::get('/{cuotaId}', [EstudiantePagoController::class, 'obtener']);
         Route::get('/{cuotaId}/info-qr', [EstudiantePagoController::class, 'obtenerInfoQR']);
+        Route::post('/{pagoId}/subir-comprobante-qr', [EstudiantePagoController::class, 'subirComprobanteQR']);
+        Route::get('/{pagoId}/consultar-estado-qr', [EstudiantePagoController::class, 'consultarEstadoQR']);
     });
 
     // Mis notas

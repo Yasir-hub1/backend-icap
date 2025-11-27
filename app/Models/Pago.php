@@ -21,7 +21,16 @@ class Pago extends Model
         'verificado_por',
         'observaciones',
         'metodo',
-        'comprobante'
+        'comprobante',
+        // Campos PagoFácil
+        'nro_pago',
+        'nro_transaccion',
+        'estado_pagofacil',
+        'qr_image',
+        'qr_expires_at',
+        'payment_method_id',
+        'payment_info',
+        'callback_data'
     ];
 
     protected $casts = [
@@ -31,7 +40,11 @@ class Pago extends Model
         'monto' => 'decimal:2',
         'verificado' => 'boolean',
         'fecha_verificacion' => 'datetime',
-        'verificado_por' => 'integer'
+        'verificado_por' => 'integer',
+        'payment_method_id' => 'integer',
+        'qr_expires_at' => 'datetime',
+        'payment_info' => 'array',
+        'callback_data' => 'array'
     ];
 
     /**
