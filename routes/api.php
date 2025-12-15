@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Route;
 */
 use App\Http\Controllers\Auth\AutenticacionEstudianteController;
 use App\Http\Controllers\Auth\AutenticacionAdminController;
+use App\Http\Controllers\Auth\AutenticacionDocenteController;
 
 /*
 |--------------------------------------------------------------------------
@@ -61,8 +62,11 @@ Route::prefix('auth')->group(function () {
     Route::post('/estudiante/registrar', [AutenticacionEstudianteController::class, 'registrar']);
     Route::post('/estudiante/login', [AutenticacionEstudianteController::class, 'iniciarSesion']);
 
-    // Admin/Docente
+    // Admin
     Route::post('/admin/login', [AutenticacionAdminController::class, 'iniciarSesion']);
+
+    // Docente
+    Route::post('/docente/login', [AutenticacionDocenteController::class, 'iniciarSesion']);
 
     // Logout público (no requiere autenticación)
     Route::post('/logout', [AutenticacionEstudianteController::class, 'cerrarSesion']);
@@ -455,6 +459,16 @@ Route::middleware(['auth:api', 'role:ADMIN'])->prefix('admin')->group(function (
 */
 Route::middleware(['auth:api', 'role:DOCENTE'])->prefix('docente')->group(function () {
 
+    // Dashboard y estadísticas
+    Route::get('/dashboard/estadisticas', [\App\Http\Controllers\Docente\DashboardController::class, 'estadisticas']);
+
+    // Perfil y credenciales
+    Route::prefix('perfil')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Docente\PerfilController::class, 'obtenerPerfil']);
+        Route::post('/cambiar-password', [\App\Http\Controllers\Docente\PerfilController::class, 'cambiarPassword']);
+        Route::post('/cambiar-email', [\App\Http\Controllers\Docente\PerfilController::class, 'cambiarEmail']);
+    });
+
     // Mis grupos asignados
     Route::prefix('grupos')->group(function () {
         Route::get('/', [\App\Http\Controllers\Docente\GrupoController::class, 'listar']);
@@ -466,6 +480,7 @@ Route::middleware(['auth:api', 'role:DOCENTE'])->prefix('docente')->group(functi
         Route::post('/nota', [\App\Http\Controllers\Docente\EvaluacionController::class, 'registrarNota']);
         Route::post('/estado', [\App\Http\Controllers\Docente\EvaluacionController::class, 'actualizarEstado']);
         Route::post('/notas-masivas', [\App\Http\Controllers\Docente\EvaluacionController::class, 'registrarNotasMasivas']);
+        Route::post('/enviar-notificacion', [\App\Http\Controllers\Docente\EvaluacionController::class, 'enviarNotificacionEstudiantes']);
     });
 
     // Mantener compatibilidad con rutas antiguas si existen

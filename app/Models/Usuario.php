@@ -18,7 +18,8 @@ class Usuario extends Authenticatable implements JWTSubject
         'email',
         'password',
         'persona_id',
-        'rol_id'
+        'rol_id',
+        'debe_cambiar_password'
     ];
 
     protected $hidden = [
@@ -28,7 +29,8 @@ class Usuario extends Authenticatable implements JWTSubject
     protected $casts = [
         'usuario_id' => 'integer',
         'persona_id' => 'integer',
-        'rol_id' => 'integer'
+        'rol_id' => 'integer',
+        'debe_cambiar_password' => 'boolean'
     ];
 
     /**

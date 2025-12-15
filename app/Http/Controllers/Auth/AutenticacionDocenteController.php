@@ -11,20 +11,32 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
-class AutenticacionAdminController extends Controller
+class AutenticacionDocenteController extends Controller
 {
     /**
-     * Iniciar sesión para administradores
+     * Iniciar sesión para docentes
+     * Permite login con email o CI + contraseña
      */
     public function iniciarSesion(Request $request)
     {
         try {
-            Log::info('🔐 Admin Login attempt', $request->only('email', 'ci'));
+            Log::info('🔐 Docente Login attempt', $request->only('email', 'ci'));
 
-            // Validar que venga email o ci
+            // Validar que venga email o ci, y contraseña
             $validator = Validator::make($request->all(), [
                 'password' => 'required|string|min:6'
             ]);
+
+            // Validar que venga al menos email o ci
+            if (!$request->has('email') && !$request->has('ci')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Debe proporcionar email o CI para iniciar sesión',
+                    'errors' => [
+                        'credentials' => ['Email o CI requerido']
+                    ]
+                ], 422);
+            }
 
             if ($validator->fails()) {
                 return response()->json([
@@ -36,51 +48,63 @@ class AutenticacionAdminController extends Controller
 
             // Buscar usuario por email o CI
             $usuario = null;
-            if ($request->has('email')) {
-                $usuario = Usuario::where('email', $request->email)->first();
-            } elseif ($request->has('ci')) {
-                // Buscar por persona con ese CI
+            $credencialUsada = null;
+
+            if ($request->has('email') && !empty($request->email)) {
+                $credencialUsada = 'email';
+                $usuario = Usuario::where('email', trim(strtolower($request->email)))->first();
+                Log::info('🔍 Buscando por email', ['email' => $request->email, 'found' => $usuario ? 'yes' : 'no']);
+            } elseif ($request->has('ci') && !empty($request->ci)) {
+                $credencialUsada = 'ci';
+                // Buscar persona por CI
                 $persona = Persona::where('ci', $request->ci)->first();
                 if ($persona) {
                     $usuario = Usuario::where('persona_id', $persona->persona_id)->first();
+                    Log::info('🔍 Buscando por CI', ['ci' => $request->ci, 'found' => $usuario ? 'yes' : 'no']);
                 }
             }
 
             if (!$usuario) {
-                Log::warning('🔐 Usuario no encontrado', ['email' => $request->email, 'ci' => $request->ci]);
+                Log::warning('🔐 Docente no encontrado', [
+                    'email' => $request->email,
+                    'ci' => $request->ci,
+                    'credencial_usada' => $credencialUsada
+                ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Credenciales incorrectas'
+                    'message' => 'Credenciales incorrectas. Verifica tu ' . ($credencialUsada === 'email' ? 'email' : 'CI') . ' y contraseña.'
                 ], 401);
             }
 
             // Verificar password
             if (!Hash::check($request->password, $usuario->password)) {
-                Log::warning('🔐 Password incorrecto', ['usuario_id' => $usuario->usuario_id]);
+                Log::warning('🔐 Password incorrecto', [
+                    'usuario_id' => $usuario->usuario_id,
+                    'email' => $usuario->email
+                ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Credenciales incorrectas'
+                    'message' => 'Credenciales incorrectas. Verifica tu contraseña.'
                 ], 401);
             }
 
             // Cargar relación con rol y permisos ANTES de generar el token
             $usuario->load('rol.permisos', 'persona');
 
-            // Verificar que tenga rol ADMIN específicamente
+            // Verificar que tenga rol DOCENTE específicamente
             $rolNombre = $usuario->rol ? $usuario->rol->nombre_rol : null;
-            if ($rolNombre !== 'ADMIN') {
-                Log::warning('🔐 Rol no autorizado para login admin', [
+            if ($rolNombre !== 'DOCENTE') {
+                Log::warning('🔐 Rol no autorizado para login docente', [
                     'usuario_id' => $usuario->usuario_id,
                     'rol' => $rolNombre
                 ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Acceso denegado. Esta área es exclusiva para administradores. Si eres docente, usa el portal de docentes.'
+                    'message' => 'Acceso denegado. Esta área es exclusiva para docentes. Si eres administrador, usa el portal de administración.'
                 ], 403);
             }
 
-            // Generar token JWT con custom claims explícitos para asegurar que el rol esté incluido
-            // Esto es necesario porque el modelo puede no tener el rol cargado cuando se llama getJWTCustomClaims()
+            // Generar token JWT con custom claims
             $customClaims = [
                 'rol' => $rolNombre,
                 'rol_id' => $usuario->rol_id,
@@ -103,12 +127,13 @@ class AutenticacionAdminController extends Controller
                 ]);
             }
 
-            Log::info('✅ Login exitoso', [
+            Log::info('✅ Login docente exitoso', [
                 'usuario_id' => $usuario->usuario_id,
+                'email' => $usuario->email,
                 'rol' => $rolNombre,
                 'rol_id' => $usuario->rol_id,
                 'rol_en_token' => $tokenRol,
-                'token_valid' => !empty($tokenRol)
+                'debe_cambiar_password' => $usuario->debe_cambiar_password ?? false
             ]);
 
             // Cargar permisos del rol
@@ -140,8 +165,8 @@ class AutenticacionAdminController extends Controller
                 'user' => [
                     'id' => $usuario->usuario_id,
                     'email' => $usuario->email,
-                    'nombre' => $usuario->persona->nombre ?? 'Admin',
-                    'apellido' => $usuario->persona->apellido ?? 'Sistema',
+                    'nombre' => $usuario->persona->nombre ?? 'Docente',
+                    'apellido' => $usuario->persona->apellido ?? '',
                     'ci' => $usuario->persona->ci ?? null,
                     'rol' => $rolNombre,
                     'rol_id' => $usuario->rol_id,
@@ -151,7 +176,7 @@ class AutenticacionAdminController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Error en login admin: ' . $e->getMessage());
+            Log::error('❌ Error en login docente: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
             return response()->json([
                 'success' => false,
@@ -161,3 +186,4 @@ class AutenticacionAdminController extends Controller
         }
     }
 }
+

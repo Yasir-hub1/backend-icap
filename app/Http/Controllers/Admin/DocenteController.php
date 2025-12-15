@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Docente;
 use App\Models\Persona;
 use App\Models\Grupo;
+use App\Models\Usuario;
+use App\Models\Rol;
 use App\Helpers\CodigoHelper;
 use App\Traits\RegistraBitacora;
 use Illuminate\Http\Request;
@@ -13,6 +15,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class DocenteController extends Controller
 {
@@ -188,6 +192,8 @@ class DocenteController extends Controller
             'direccion' => 'nullable|string|max:255',
             'fotografia' => 'nullable|string|max:255',
             'usuario_id' => 'nullable|exists:usuario,id',
+            // Datos de Usuario (requeridos para crear credenciales)
+            'email' => 'required|email|max:255|unique:usuario,email',
             // Datos de Docente - registro_docente ya no es requerido, se genera automáticamente
             'cargo' => 'nullable|string|max:100',
             'area_de_especializacion' => 'nullable|string|max:200',
@@ -199,7 +205,10 @@ class DocenteController extends Controller
             'apellido.required' => 'El apellido es obligatorio',
             'celular.regex' => 'El celular solo debe contener números',
             'fecha_nacimiento.before' => 'La fecha de nacimiento debe ser anterior a hoy',
-            'sexo.in' => 'El sexo debe ser M o F'
+            'sexo.in' => 'El sexo debe ser M o F',
+            'email.required' => 'El email es obligatorio para crear las credenciales de acceso',
+            'email.email' => 'El email debe tener un formato válido',
+            'email.unique' => 'El email ya está registrado en el sistema'
         ]);
 
         if ($validator->fails()) {
@@ -257,17 +266,45 @@ class DocenteController extends Controller
                 throw new \Exception('Error: No se pudo cargar el docente después de la inserción.');
             }
 
+            // Obtener rol DOCENTE
+            $rolDocente = Rol::where('nombre_rol', 'DOCENTE')->where('activo', true)->first();
+            if (!$rolDocente) {
+                DB::rollBack();
+                throw new \Exception('Error: El rol DOCENTE no existe en el sistema. Contacte al administrador.');
+            }
+
+            // Generar contraseña temporal segura (8 caracteres: mayúscula, minúscula, número)
+            $passwordTemporal = Str::random(8) . rand(0, 9) . strtoupper(Str::random(1));
+
+            // Crear Usuario con email y password temporal
+            // El docente deberá cambiar la contraseña en su primer login
+            $usuario = Usuario::create([
+                'email' => trim(strtolower($request->email)),
+                'password' => Hash::make($passwordTemporal),
+                'persona_id' => $persona->id,
+                'rol_id' => $rolDocente->rol_id,
+                'debe_cambiar_password' => true // Requerir cambio de contraseña en primer login
+            ]);
+
             Cache::forget('docentes_*');
 
             DB::commit();
 
             // Registrar en bitácora
-            $this->registrarCreacion('docente', $docente->id, "Docente: {$docente->nombre} {$docente->apellido} - Registro: {$docente->registro_docente}");
+            $this->registrarCreacion('docente', $docente->id, "Docente: {$docente->nombre} {$docente->apellido} - Registro: {$docente->registro_docente} - Usuario creado con email: {$usuario->email}");
 
+            // Retornar datos incluyendo credenciales temporales (solo para mostrar al admin)
             return response()->json([
                 'success' => true,
-                'data' => $docente,
-                'message' => 'Docente creado exitosamente'
+                'data' => [
+                    'docente' => $docente,
+                    'usuario' => [
+                        'email' => $usuario->email,
+                        'password_temporal' => $passwordTemporal, // Solo se muestra una vez
+                        'debe_cambiar_password' => true
+                    ]
+                ],
+                'message' => 'Docente y usuario creados exitosamente. El docente debe cambiar su contraseña en el primer login.'
             ], 201)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');

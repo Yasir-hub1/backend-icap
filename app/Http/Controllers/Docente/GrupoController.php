@@ -20,11 +20,11 @@ class GrupoController extends Controller
     {
         try {
             $docente = $request->auth_user;
-            $registroDocente = $docente instanceof \App\Models\Docente
-                ? $docente->registro_docente
+            $docenteId = $docente instanceof \App\Models\Docente
+                ? $docente->id
                 : $docente->id;
 
-            $grupos = Grupo::where('registro_docente', $registroDocente)
+            $grupos = Grupo::where('docente_id', $docenteId)
                 ->with([
                     'programa',
                     'modulo',
@@ -80,12 +80,12 @@ class GrupoController extends Controller
     {
         try {
             $docente = request()->auth_user;
-            $registroDocente = $docente instanceof \App\Models\Docente
-                ? $docente->registro_docente
+            $docenteId = $docente instanceof \App\Models\Docente
+                ? $docente->id
                 : $docente->id;
 
             $grupo = Grupo::where('grupo_id', $grupoId)
-                ->where('registro_docente', $registroDocente)
+                ->where('docente_id', $docenteId)
                 ->with([
                     'programa',
                     'modulo',
