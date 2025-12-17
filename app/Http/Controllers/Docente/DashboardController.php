@@ -17,10 +17,17 @@ class DashboardController extends Controller
     public function estadisticas(Request $request): JsonResponse
     {
         try {
-            $docente = $request->auth_user;
-            $docenteId = $docente instanceof \App\Models\Docente
-                ? $docente->id
-                : $docente->id;
+            $usuario = $request->auth_user;
+            
+            // El auth_user es un Usuario. El docente_id corresponde al persona_id del usuario
+            if (!$usuario instanceof \App\Models\Usuario) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado correctamente'
+                ], 401);
+            }
+            
+            $docenteId = $usuario->persona_id;
 
             // Obtener grupos del docente
             $grupos = Grupo::where('docente_id', $docenteId)

@@ -29,6 +29,19 @@ class ConvenioController extends Controller
             $estado = $request->get('estado');
             $fechaDesde = $request->get('fecha_desde');
             $fechaHasta = $request->get('fecha_hasta');
+            $sortBy = $request->get('sort_by', 'fecha_ini');
+            $sortDirection = $request->get('sort_direction', 'desc');
+
+            // Validar dirección de ordenamiento
+            if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
+                $sortDirection = 'desc';
+            }
+
+            // Validar columnas permitidas para ordenamiento
+            $allowedSortColumns = ['numero_convenio', 'objeto_convenio', 'fecha_ini', 'fecha_fin', 'fecha_firma'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'fecha_ini';
+            }
 
             $query = Convenio::with([
                 'tipoConvenio:tipo_convenio_id,nombre_tipo',
@@ -61,12 +74,20 @@ class ConvenioController extends Controller
                 $query->where('fecha_fin', '<=', $fechaHasta);
             }
 
-            $convenios = $query->orderBy('fecha_ini', 'desc')
+            $convenios = $query->orderBy($sortBy, $sortDirection)
                               ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $convenios,
+                'data' => [
+                    'data' => $convenios->items(),
+                    'current_page' => $convenios->currentPage(),
+                    'per_page' => $convenios->perPage(),
+                    'total' => $convenios->total(),
+                    'last_page' => $convenios->lastPage(),
+                    'from' => $convenios->firstItem(),
+                    'to' => $convenios->lastItem()
+                ],
                 'message' => 'Convenios obtenidos exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')

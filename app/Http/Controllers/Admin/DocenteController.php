@@ -30,6 +30,19 @@ class DocenteController extends Controller
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
             $especializacion = $request->get('especializacion', '');
+            $sortBy = $request->get('sort_by', 'apellido');
+            $sortDirection = $request->get('sort_direction', 'asc');
+
+            // Validar dirección de ordenamiento
+            if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
+                $sortDirection = 'asc';
+            }
+
+            // Validar columnas permitidas para ordenamiento
+            $allowedSortColumns = ['nombre', 'apellido', 'ci', 'registro_docente', 'cargo', 'area_de_especializacion'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'apellido';
+            }
 
             $query = Docente::withCount('grupos');
 
@@ -46,13 +59,27 @@ class DocenteController extends Controller
                 $query->where('area_de_especializacion', 'ILIKE', "%{$especializacion}%");
             }
 
-            $docentes = $query->orderBy('apellido', 'asc')
-                             ->orderBy('nombre', 'asc')
-                             ->paginate($perPage);
+            // Si se ordena por apellido, agregar nombre como segundo criterio
+            if ($sortBy === 'apellido') {
+                $docentes = $query->orderBy($sortBy, $sortDirection)
+                                 ->orderBy('nombre', 'asc')
+                                 ->paginate($perPage);
+            } else {
+                $docentes = $query->orderBy($sortBy, $sortDirection)
+                                 ->paginate($perPage);
+            }
 
             return response()->json([
                 'success' => true,
-                'data' => $docentes,
+                'data' => [
+                    'data' => $docentes->items(),
+                    'current_page' => $docentes->currentPage(),
+                    'per_page' => $docentes->perPage(),
+                    'total' => $docentes->total(),
+                    'last_page' => $docentes->lastPage(),
+                    'from' => $docentes->firstItem(),
+                    'to' => $docentes->lastItem()
+                ],
                 'message' => 'Docentes obtenidos exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')

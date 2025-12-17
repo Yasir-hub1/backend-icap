@@ -23,22 +23,50 @@ class PaisController extends Controller
         try {
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
+            $sortBy = $request->get('sort_by', 'nombre_pais');
+            $sortDirection = $request->get('sort_direction', 'asc');
+
+            // Validar dirección de ordenamiento
+            $sortDirection = in_array(strtolower($sortDirection), ['asc', 'desc']) 
+                ? strtolower($sortDirection) 
+                : 'asc';
+
+            // Validar columna de ordenamiento
+            $allowedSortColumns = ['nombre_pais', 'codigo_iso', 'codigo_telefono', 'created_at'];
+            $sortBy = in_array($sortBy, $allowedSortColumns) ? $sortBy : 'nombre_pais';
 
             $query = Pais::query();
 
             if ($search) {
                 $query->where(function($q) use ($search) {
                     $q->where('nombre_pais', 'ILIKE', "%{$search}%")
-                      ->orWhere('codigo_iso', 'ILIKE', "%{$search}%");
+                      ->orWhere('codigo_iso', 'ILIKE', "%{$search}%")
+                      ->orWhere('codigo_telefono', 'ILIKE', "%{$search}%");
                 });
             }
 
-            $paises = $query->orderBy('nombre_pais', 'asc')
+            // Contar total antes de paginar
+            $total = $query->count();
+
+            $paises = $query->orderBy($sortBy, $sortDirection)
                            ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $paises,
+                'data' => [
+                    'data' => $paises->items(),
+                    'current_page' => $paises->currentPage(),
+                    'last_page' => $paises->lastPage(),
+                    'per_page' => $paises->perPage(),
+                    'total' => $paises->total(),
+                    'from' => $paises->firstItem(),
+                    'to' => $paises->lastItem(),
+                ],
+                'meta' => [
+                    'total_registros' => $total,
+                    'registros_pagina_actual' => $paises->count(),
+                    'tiene_mas_paginas' => $paises->hasMorePages(),
+                ],
                 'message' => 'Países obtenidos exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')

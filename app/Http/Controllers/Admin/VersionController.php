@@ -23,6 +23,19 @@ class VersionController extends Controller
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
             $año = $request->get('año');
+            $sortBy = $request->get('sort_by', 'año');
+            $sortDirection = $request->get('sort_direction', 'desc');
+
+            // Validar dirección de ordenamiento
+            if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
+                $sortDirection = 'desc';
+            }
+
+            // Validar columnas permitidas para ordenamiento
+            $allowedSortColumns = ['nombre', 'año', 'id'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'año';
+            }
 
             $query = Version::withCount('programas');
 
@@ -34,13 +47,27 @@ class VersionController extends Controller
                 $query->where('año', $año);
             }
 
-            $versiones = $query->orderBy('año', 'desc')
-                              ->orderBy('nombre', 'asc')
-                              ->paginate($perPage);
+            // Si se ordena por año, agregar nombre como segundo criterio
+            if ($sortBy === 'año') {
+                $versiones = $query->orderBy($sortBy, $sortDirection)
+                                  ->orderBy('nombre', 'asc')
+                                  ->paginate($perPage);
+            } else {
+                $versiones = $query->orderBy($sortBy, $sortDirection)
+                                  ->paginate($perPage);
+            }
 
             return response()->json([
                 'success' => true,
-                'data' => $versiones,
+                'data' => [
+                    'data' => $versiones->items(),
+                    'current_page' => $versiones->currentPage(),
+                    'per_page' => $versiones->perPage(),
+                    'total' => $versiones->total(),
+                    'last_page' => $versiones->lastPage(),
+                    'from' => $versiones->firstItem(),
+                    'to' => $versiones->lastItem()
+                ],
                 'message' => 'Versiones obtenidas exitosamente'
             ]);
         } catch (\Exception $e) {

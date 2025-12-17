@@ -37,10 +37,22 @@ class EvaluacionController extends Controller
 
         DB::beginTransaction();
         try {
-            $docente = $request->auth_user;
-            $docenteId = $docente instanceof \App\Models\Docente
-                ? $docente->id
-                : $docente->id;
+            $usuario = $request->auth_user;
+            
+            // El auth_user es un Usuario. El docente_id corresponde al persona_id del usuario
+            if (!$usuario instanceof \App\Models\Usuario) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado correctamente'
+                ], 401);
+            }
+            
+            $docenteId = $usuario->persona_id;
+            
+            // Cargar persona para obtener datos del docente
+            if (!$usuario->relationLoaded('persona')) {
+                $usuario->load('persona');
+            }
 
             // Verificar que el grupo pertenezca al docente
             $grupo = Grupo::where('grupo_id', $request->grupo_id)
@@ -79,13 +91,13 @@ class EvaluacionController extends Controller
             ]);
 
             // Registrar en bitácora
-            $usuario = $docente->usuario ?? null;
             if ($usuario) {
+                $nombreDocente = $usuario->persona ? "{$usuario->persona->nombre} {$usuario->persona->apellido}" : "Docente ID {$usuario->usuario_id}";
                 Bitacora::create([
                     'fecha' => now()->toDateString(),
                     'tabla' => 'Grupo_estudiante',
                     'codTabla' => "{$request->grupo_id}-{$request->estudiante_registro}",
-                    'transaccion' => "Docente {$docente->nombre} {$docente->apellido} registró nota {$request->nota} y estado {$estado} para el estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) en el grupo {$grupo->grupo_id}",
+                    'transaccion' => "Docente {$nombreDocente} registró nota {$request->nota} y estado {$estado} para el estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) en el grupo {$grupo->grupo_id}",
                     'usuario_id' => $usuario->usuario_id
                 ]);
             }
@@ -133,10 +145,22 @@ class EvaluacionController extends Controller
 
         DB::beginTransaction();
         try {
-            $docente = $request->auth_user;
-            $docenteId = $docente instanceof \App\Models\Docente
-                ? $docente->id
-                : $docente->id;
+            $usuario = $request->auth_user;
+            
+            // El auth_user es un Usuario. El docente_id corresponde al persona_id del usuario
+            if (!$usuario instanceof \App\Models\Usuario) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado correctamente'
+                ], 401);
+            }
+            
+            $docenteId = $usuario->persona_id;
+            
+            // Cargar persona para obtener datos del docente
+            if (!$usuario->relationLoaded('persona')) {
+                $usuario->load('persona');
+            }
 
             // Verificar que el grupo pertenezca al docente
             $grupo = Grupo::where('grupo_id', $request->grupo_id)
@@ -168,13 +192,13 @@ class EvaluacionController extends Controller
             ]);
 
             // Registrar en bitácora
-            $usuario = $docente->usuario ?? null;
             if ($usuario) {
+                $nombreDocente = $usuario->persona ? "{$usuario->persona->nombre} {$usuario->persona->apellido}" : "Docente ID {$usuario->usuario_id}";
                 Bitacora::create([
                     'fecha' => now()->toDateString(),
                     'tabla' => 'Grupo_estudiante',
                     'codTabla' => "{$request->grupo_id}-{$request->estudiante_registro}",
-                    'transaccion' => "Docente {$docente->nombre} {$docente->apellido} cambió el estado a {$request->estado} para el estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) en el grupo {$grupo->grupo_id}" . ($notaActual ? " (Nota: {$notaActual})" : ''),
+                    'transaccion' => "Docente {$nombreDocente} cambió el estado a {$request->estado} para el estudiante {$estudiante->nombre} {$estudiante->apellido} (CI: {$estudiante->ci}) en el grupo {$grupo->grupo_id}" . ($notaActual ? " (Nota: {$notaActual})" : ''),
                     'usuario_id' => $usuario->usuario_id
                 ]);
             }
@@ -220,10 +244,22 @@ class EvaluacionController extends Controller
 
         DB::beginTransaction();
         try {
-            $docente = $request->auth_user;
-            $docenteId = $docente instanceof \App\Models\Docente
-                ? $docente->id
-                : $docente->id;
+            $usuario = $request->auth_user;
+            
+            // El auth_user es un Usuario. El docente_id corresponde al persona_id del usuario
+            if (!$usuario instanceof \App\Models\Usuario) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado correctamente'
+                ], 401);
+            }
+            
+            $docenteId = $usuario->persona_id;
+            
+            // Cargar persona para obtener datos del docente
+            if (!$usuario->relationLoaded('persona')) {
+                $usuario->load('persona');
+            }
 
             // Verificar que el grupo pertenezca al docente
             $grupo = Grupo::where('grupo_id', $request->grupo_id)
@@ -273,13 +309,13 @@ class EvaluacionController extends Controller
             }
 
             // Registrar en bitácora
-            $usuario = $docente->usuario ?? null;
             if ($usuario && $registrosActualizados > 0) {
+                $nombreDocente = $usuario->persona ? "{$usuario->persona->nombre} {$usuario->persona->apellido}" : "Docente ID {$usuario->usuario_id}";
                 Bitacora::create([
                     'fecha' => now()->toDateString(),
                     'tabla' => 'Grupo_estudiante',
                     'codTabla' => $request->grupo_id,
-                    'transaccion' => "Docente {$docente->nombre} {$docente->apellido} registró {$registrosActualizados} notas masivamente en el grupo {$grupo->grupo_id}",
+                    'transaccion' => "Docente {$nombreDocente} registró {$registrosActualizados} notas masivamente en el grupo {$grupo->grupo_id}",
                     'usuario_id' => $usuario->usuario_id
                 ]);
             }
@@ -370,10 +406,22 @@ class EvaluacionController extends Controller
         }
 
         try {
-            $docente = $request->auth_user;
-            $docenteId = $docente instanceof \App\Models\Docente
-                ? $docente->id
-                : $docente->id;
+            $usuario = $request->auth_user;
+            
+            // El auth_user es un Usuario. El docente_id corresponde al persona_id del usuario
+            if (!$usuario instanceof \App\Models\Usuario) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado correctamente'
+                ], 401);
+            }
+            
+            $docenteId = $usuario->persona_id;
+            
+            // Cargar persona para obtener datos del docente
+            if (!$usuario->relationLoaded('persona')) {
+                $usuario->load('persona');
+            }
 
             // Verificar que el grupo pertenezca al docente
             $grupo = Grupo::where('grupo_id', $request->grupo_id)
@@ -429,13 +477,13 @@ class EvaluacionController extends Controller
             }
 
             // Registrar en bitácora
-            $usuario = $docente->usuario ?? null;
             if ($usuario) {
+                $nombreDocente = $usuario->persona ? "{$usuario->persona->nombre} {$usuario->persona->apellido}" : "Docente ID {$usuario->usuario_id}";
                 Bitacora::create([
                     'fecha' => now()->toDateString(),
                     'tabla' => 'Notificaciones',
                     'codTabla' => $request->grupo_id,
-                    'transaccion' => "Docente {$docente->nombre} {$docente->apellido} envió notificación a {$enviadas} estudiante(s) del grupo {$grupo->grupo_id}",
+                    'transaccion' => "Docente {$nombreDocente} envió notificación a {$enviadas} estudiante(s) del grupo {$grupo->grupo_id}",
                     'usuario_id' => $usuario->usuario_id
                 ]);
             }

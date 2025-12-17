@@ -22,6 +22,17 @@ class TipoConvenioController extends Controller
         try {
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
+            $sortBy = $request->get('sort_by', 'nombre_tipo');
+            $sortDirection = $request->get('sort_direction', 'asc');
+
+            // Validar dirección de ordenamiento
+            $sortDirection = in_array(strtolower($sortDirection), ['asc', 'desc']) 
+                ? strtolower($sortDirection) 
+                : 'asc';
+
+            // Validar columna de ordenamiento
+            $allowedSortColumns = ['nombre_tipo', 'descripcion', 'created_at'];
+            $sortBy = in_array($sortBy, $allowedSortColumns) ? $sortBy : 'nombre_tipo';
 
             $query = TipoConvenio::withCount('convenios');
 
@@ -32,12 +43,29 @@ class TipoConvenioController extends Controller
                 });
             }
 
-            $tipos = $query->orderBy('nombre_tipo', 'asc')
+            // Contar total antes de paginar
+            $total = $query->count();
+
+            $tipos = $query->orderBy($sortBy, $sortDirection)
                           ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $tipos,
+                'data' => [
+                    'data' => $tipos->items(),
+                    'current_page' => $tipos->currentPage(),
+                    'last_page' => $tipos->lastPage(),
+                    'per_page' => $tipos->perPage(),
+                    'total' => $tipos->total(),
+                    'from' => $tipos->firstItem(),
+                    'to' => $tipos->lastItem(),
+                ],
+                'meta' => [
+                    'total_registros' => $total,
+                    'registros_pagina_actual' => $tipos->count(),
+                    'tiene_mas_paginas' => $tipos->hasMorePages(),
+                    'tipos_con_convenios' => TipoConvenio::has('convenios')->count(),
+                ],
                 'message' => 'Tipos de convenio obtenidos exitosamente'
             ]);
         } catch (\Exception $e) {

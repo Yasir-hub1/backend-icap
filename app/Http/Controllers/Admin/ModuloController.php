@@ -22,6 +22,19 @@ class ModuloController extends Controller
         try {
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
+            $sortBy = $request->get('sort_by', 'nombre');
+            $sortDirection = $request->get('sort_direction', 'asc');
+
+            // Validar dirección de ordenamiento
+            if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
+                $sortDirection = 'asc';
+            }
+
+            // Validar columnas permitidas para ordenamiento
+            $allowedSortColumns = ['nombre', 'credito', 'horas_academicas', 'modulo_id'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'nombre';
+            }
 
             $query = Modulo::withCount('programas');
 
@@ -29,12 +42,20 @@ class ModuloController extends Controller
                 $query->where('nombre', 'ILIKE', "%{$search}%");
             }
 
-            $modulos = $query->orderBy('nombre', 'asc')
+            $modulos = $query->orderBy($sortBy, $sortDirection)
                             ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $modulos,
+                'data' => [
+                    'data' => $modulos->items(),
+                    'current_page' => $modulos->currentPage(),
+                    'per_page' => $modulos->perPage(),
+                    'total' => $modulos->total(),
+                    'last_page' => $modulos->lastPage(),
+                    'from' => $modulos->firstItem(),
+                    'to' => $modulos->lastItem()
+                ],
                 'message' => 'Módulos obtenidos exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')

@@ -22,6 +22,19 @@ class RamaAcademicaController extends Controller
         try {
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
+            $sortBy = $request->get('sort_by', 'nombre');
+            $sortDirection = $request->get('sort_direction', 'asc');
+
+            // Validar dirección de ordenamiento
+            if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
+                $sortDirection = 'asc';
+            }
+
+            // Validar columnas permitidas para ordenamiento
+            $allowedSortColumns = ['nombre', 'id'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'nombre';
+            }
 
             $query = RamaAcademica::withCount('programas');
 
@@ -29,12 +42,20 @@ class RamaAcademicaController extends Controller
                 $query->where('nombre', 'ILIKE', "%{$search}%");
             }
 
-            $ramas = $query->orderBy('nombre', 'asc')
+            $ramas = $query->orderBy($sortBy, $sortDirection)
                           ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $ramas,
+                'data' => [
+                    'data' => $ramas->items(),
+                    'current_page' => $ramas->currentPage(),
+                    'per_page' => $ramas->perPage(),
+                    'total' => $ramas->total(),
+                    'last_page' => $ramas->lastPage(),
+                    'from' => $ramas->firstItem(),
+                    'to' => $ramas->lastItem()
+                ],
                 'message' => 'Ramas académicas obtenidas exitosamente'
             ]);
         } catch (\Exception $e) {

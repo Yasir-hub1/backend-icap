@@ -31,6 +31,19 @@ class ProgramaController extends Controller
             $tipoProgramaId = $request->get('tipo_programa_id');
             $versionId = $request->get('version_id');
             $institucionId = $request->get('institucion_id');
+            $sortBy = $request->get('sort_by', 'nombre');
+            $sortDirection = $request->get('sort_direction', 'asc');
+
+            // Validar dirección de ordenamiento
+            if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
+                $sortDirection = 'asc';
+            }
+
+            // Validar columnas permitidas para ordenamiento
+            $allowedSortColumns = ['nombre', 'duracion_meses', 'costo', 'id'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'nombre';
+            }
 
             $query = Programa::with([
                 'ramaAcademica:id,nombre',
@@ -59,12 +72,20 @@ class ProgramaController extends Controller
                 $query->where('institucion_id', $institucionId);
             }
 
-            $programas = $query->orderBy('nombre', 'asc')
+            $programas = $query->orderBy($sortBy, $sortDirection)
                                ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $programas,
+                'data' => [
+                    'data' => $programas->items(),
+                    'current_page' => $programas->currentPage(),
+                    'per_page' => $programas->perPage(),
+                    'total' => $programas->total(),
+                    'last_page' => $programas->lastPage(),
+                    'from' => $programas->firstItem(),
+                    'to' => $programas->lastItem()
+                ],
                 'message' => 'Programas obtenidos exitosamente'
             ], 200)->header('Access-Control-Allow-Origin', '*')
                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')

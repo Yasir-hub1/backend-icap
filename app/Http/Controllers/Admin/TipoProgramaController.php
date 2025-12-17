@@ -22,6 +22,19 @@ class TipoProgramaController extends Controller
         try {
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
+            $sortBy = $request->get('sort_by', 'nombre');
+            $sortDirection = $request->get('sort_direction', 'asc');
+
+            // Validar dirección de ordenamiento
+            if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
+                $sortDirection = 'asc';
+            }
+
+            // Validar columnas permitidas para ordenamiento
+            $allowedSortColumns = ['nombre', 'id'];
+            if (!in_array($sortBy, $allowedSortColumns)) {
+                $sortBy = 'nombre';
+            }
 
             $query = TipoPrograma::withCount('programas');
 
@@ -29,12 +42,20 @@ class TipoProgramaController extends Controller
                 $query->where('nombre', 'ILIKE', "%{$search}%");
             }
 
-            $tipos = $query->orderBy('nombre', 'asc')
+            $tipos = $query->orderBy($sortBy, $sortDirection)
                           ->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $tipos,
+                'data' => [
+                    'data' => $tipos->items(),
+                    'current_page' => $tipos->currentPage(),
+                    'per_page' => $tipos->perPage(),
+                    'total' => $tipos->total(),
+                    'last_page' => $tipos->lastPage(),
+                    'from' => $tipos->firstItem(),
+                    'to' => $tipos->lastItem()
+                ],
                 'message' => 'Tipos de programa obtenidos exitosamente'
             ]);
         } catch (\Exception $e) {

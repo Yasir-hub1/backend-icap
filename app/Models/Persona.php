@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Persona extends Model
 {
@@ -45,6 +46,26 @@ class Persona extends Model
     public function documentos(): HasMany
     {
         return $this->hasMany(Documento::class, 'persona_id', 'id');
+    }
+
+    /**
+     * Relación con docente (1:0..1)
+     * Una persona puede ser un docente (herencia en PostgreSQL)
+     * La tabla docente hereda de persona, por lo que comparten el mismo id
+     */
+    public function docente()
+    {
+        return $this->hasOne(Docente::class, 'id', 'id');
+    }
+
+    /**
+     * Relación con estudiante (1:0..1)
+     * Una persona puede ser un estudiante (herencia en PostgreSQL)
+     * La tabla estudiante hereda de persona, por lo que comparten el mismo id
+     */
+    public function estudiante()
+    {
+        return $this->hasOne(Estudiante::class, 'id', 'id');
     }
 
     /**

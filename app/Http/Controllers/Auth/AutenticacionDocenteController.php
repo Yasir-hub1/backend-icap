@@ -59,8 +59,8 @@ class AutenticacionDocenteController extends Controller
                 // Buscar persona por CI
                 $persona = Persona::where('ci', $request->ci)->first();
                 if ($persona) {
-                    $usuario = Usuario::where('persona_id', $persona->persona_id)->first();
-                    Log::info('🔍 Buscando por CI', ['ci' => $request->ci, 'found' => $usuario ? 'yes' : 'no']);
+                    $usuario = Usuario::where('persona_id', $persona->id)->first();
+                    Log::info('🔍 Buscando por CI', ['ci' => $request->ci, 'persona_id' => $persona->id, 'found' => $usuario ? 'yes' : 'no']);
                 }
             }
 
